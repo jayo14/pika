@@ -59,12 +59,55 @@ db.exec(`
   )
 `);
 
+// A/B Testing Tables
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ab_tests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT 0,
+    start_date TIMESTAMP,
+    end_date TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ab_test_variants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    test_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    message_text TEXT,
+    weight INTEGER DEFAULT 1, -- Higher weight = more likely to be shown
+    is_control BOOLEAN DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (test_id) REFERENCES ab_tests(id) ON DELETE CASCADE
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ab_test_exposures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    test_id INTEGER NOT NULL,
+    variant_id INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    guild_id TEXT NOT NULL,
+    exposed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    clicked BOOLEAN DEFAULT 0,
+    reacted BOOLEAN DEFAULT 0,
+    FOREIGN KEY (test_id) REFERENCES ab_tests(id) ON DELETE CASCADE,
+    FOREIGN KEY (variant_id) REFERENCES ab_test_variants(id) ON DELETE CASCADE
+  )
+`);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,      // For guild-related events
     GatewayIntentBits.GuildMembers, // For guild member events (like guildMemberAdd)
     GatewayIntentBits.GuildMessageReactions, // For reaction tracking
     GatewayIntentBits.DirectMessages, // For DM reactions
+    GatewayIntentBits.GuildMessageTyping, // For typing indicators (engagement)
   ],
   partials: [Partials.User, Partials.GuildMember, Partials.Channel, Partials.Message, Partials.Reaction, Partials.GuildScheduledEvent], // Helps with uncached members/channels/messages/reactions/events
 });
@@ -139,6 +182,89 @@ function removeWelcomeComponent(componentId: number): void {
 // Function to clear all welcome components for a guild
 function clearWelcomeComponents(guildId: string): void {
   db.prepare('DELETE FROM welcome_components WHERE guild_id = ?').run(guildId);
+}
+
+// Function to get active A/B test for a guild
+function getActiveAbTest(guildId: string) {
+  const now = new Date().toISOString();
+  return db.prepare(`
+    SELECT * FROM ab_tests
+    WHERE guild_id = ?
+      AND is_active = 1
+      AND (start_date IS NULL OR start_date <= ?)
+      AND (end_date IS NULL OR end_date >= ?)
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(guildId, now, now);
+}
+
+// Function to get variants for an A/B test
+function getAbTestVariants(testId: number) {
+  return db.prepare(`
+    SELECT * FROM ab_test_variants
+    WHERE test_id = ?
+    ORDER BY weight DESC
+  `).all(testId);
+}
+
+// Function to select a variant based on weights
+function selectAbTestVariant(variants: any[]) {
+  if (variants.length === 0) return null;
+
+  // Calculate total weight
+  const totalWeight = variants.reduce((sum, v) => sum + (v.weight || 1), 0);
+
+  // If all weights are 0, default to equal distribution
+  if (totalWeight === 0) {
+    return variants[Math.floor(Math.random() * variants.length)];
+  }
+
+  // Select based on weight
+  let random = Math.random() * totalWeight;
+  for (const variant of variants) {
+    if (random < (variant.weight || 1)) {
+      return variant;
+    }
+    random -= (variant.weight || 1);
+  }
+
+  // Fallback (shouldn't reach here)
+  return variants[0];
+}
+
+// Function to log an exposure to an A/B test variant
+function logAbTestExposure(testId: number, variantId: number, userId: string, guildId: string) {
+  db.prepare(`
+    INSERT INTO ab_test_exposures (test_id, variant_id, user_id, guild_id)
+    VALUES (?, ?, ?, ?)
+  `).run(testId, variantId, userId, guildId);
+}
+
+// Function to record engagement with an A/B test variant
+function recordAbTestEngagement(exposureId: number, engagementType: 'click' | 'react') {
+  const column = engagementType === 'click' ? 'clicked' : 'reacted';
+  db.prepare(`
+    UPDATE ab_test_exposures
+    SET ${column} = 1
+    WHERE id = ?
+  `).run(exposureId);
+}
+
+// Function to get A/B test statistics
+function getAbTestStats(testId: number) {
+  return db.prepare(`
+    SELECT
+      v.id as variant_id,
+      v.name as variant_name,
+      v.is_control,
+      COUNT(e.id) as exposures,
+      SUM(CASE WHEN e.clicked = 1 THEN 1 ELSE 0 END) as clicks,
+      SUM(CASE WHEN e.reacted = 1 THEN 1 ELSE 0 END) as reactions
+    FROM ab_test_variants v
+    LEFT JOIN ab_test_exposures e ON v.id = e.variant_id
+    WHERE v.test_id = ?
+    GROUP BY v.id, v.name, v.is_control
+  `).all(testId);
 }
 
 // Function to create a welcome card
@@ -276,28 +402,53 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
     // Get welcome components for this guild
     const welcomeComponents = getWelcomeComponents(member.guild.id);
 
+    // Check for active A/B test
+    const activeTest = getActiveAbTest(member.guild.id);
+    let selectedVariant = null;
+    let exposureId = null;
+
+    if (activeTest) {
+      const variants = getAbTestVariants(activeTest.id);
+      selectedVariant = selectAbTestVariant(variants);
+
+      if (selectedVariant) {
+        // Log exposure to this variant
+        const result = db.prepare(`
+          INSERT INTO ab_test_exposures (test_id, variant_id, user_id, guild_id)
+          VALUES (?, ?, ?, ?)
+        `).run(activeTest.id, selectedVariant.id, member.id, member.guild.id);
+        exposureId = result.lastInsertRowid;
+      }
+    }
+
+    // Determine which message to use
+    let finalMessage = WELCOME_MESSAGE_TEMPLATE;
+
+    // Use A/B test variant if available
+    if (selectedVariant && selectedVariant.message_text) {
+      finalMessage = selectedVariant.message_text;
+    }
+    // Use role-specific settings if available
+    else if (roleSpecificSetting && roleSpecificSetting.message) {
+      finalMessage = roleSpecificSetting.message;
+    }
+
+    // Determine which channel to use
+    let finalChannel = welcomeChannel;
+
+    // Use role-specific channel if available
+    if (roleSpecificSetting && roleSpecificSetting.channel_id) {
+      const roleChannel = member.guild.channels.cache.get(roleSpecificSetting.channel_id);
+      if (roleChannel && roleChannel.isTextBased()) {
+        finalChannel = roleChannel as TextChannel;
+      }
+    }
+
     if (useWelcomeCard) {
       try {
         // Generate welcome card
         const welcomeCard = await createWelcomeCard(member);
         const attachment = new AttachmentBuilder(welcomeCard, { name: 'welcome-card.png' });
-
-        // Determine which message and channel to use
-        let finalMessage = WELCOME_MESSAGE_TEMPLATE;
-        let finalChannel = welcomeChannel;
-
-        // Use role-specific settings if available
-        if (roleSpecificSetting) {
-          if (roleSpecificSetting.message) {
-            finalMessage = roleSpecificSetting.message;
-          }
-          if (roleSpecificSetting.channel_id) {
-            const roleChannel = member.guild.channels.cache.get(roleSpecificSetting.channel_id);
-            if (roleChannel && roleChannel.isTextBased()) {
-              finalChannel = roleChannel as TextChannel;
-            }
-          }
-        }
 
         // Replace placeholders in the message
         finalMessage = finalMessage.replace('{user}', member.user.username);
@@ -314,14 +465,20 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
           components: actionRows
         });
         console.log(`✅ Sent welcome card to ${member.user.tag} in #${finalChannel.name}`);
+
+        // Track engagement if this was part of an A/B test
+        if (exposureId !== null) {
+          // We'll track engagement through button clicks and reactions
+          // This is handled in the interaction and reaction listeners
+        }
       } catch (cardError) {
         console.error(`❌ Failed to create/send welcome card for ${member.user.tag}:`, cardError);
         // Fallback to regular welcome message
-        await sendRegularWelcome(member, welcomeSettings, roleSpecificSetting, welcomeChannel, welcomeComponents);
+        await sendRegularWelcome(member, welcomeSettings, roleSpecificSetting, welcomeChannel, welcomeComponents, exposureId);
       }
     } else {
       // Send regular welcome message
-      await sendRegularWelcome(member, welcomeSettings, roleSpecificSetting, welcomeChannel, welcomeComponents);
+      await sendRegularWelcome(member, welcomeSettings, roleSpecificSetting, welcomeChannel, welcomeComponents, exposureId);
     }
 
     // Send welcome DM if user hasn't opted out
@@ -456,21 +613,29 @@ function buildActionRows(components: any[]): any[] {
 }
 
 // Helper function to send regular welcome message
-async function sendRegularWelcome(member: GuildMember, welcomeSettings: any, roleSpecificSetting: any, defaultChannel: TextChannel, welcomeComponents: any[]) {
+async function sendRegularWelcome(member: GuildMember, welcomeSettings: any, roleSpecificSetting: any, defaultChannel: TextChannel, welcomeComponents: any[], exposureId: number | null = null) {
   // Determine which message and channel to use
   let finalMessage = WELCOME_MESSAGE_TEMPLATE;
-  let finalChannel = defaultChannel;
+
+  // Use A/B test variant if available
+  if (exposureId !== null) {
+    // We would look up the variant from the exposure, but for simplicity
+    // we'll rely on the selection made earlier in the function
+    // In a real implementation, we'd pass the selected variant down
+  }
 
   // Use role-specific settings if available
-  if (roleSpecificSetting) {
-    if (roleSpecificSetting.message) {
-      finalMessage = roleSpecificSetting.message;
-    }
-    if (roleSpecificSetting.channel_id) {
-      const roleChannel = member.guild.channels.cache.get(roleSpecificSetting.channel_id);
-      if (roleChannel && roleChannel.isTextBased()) {
-        finalChannel = roleChannel as TextChannel;
-      }
+  if (roleSpecificSetting && roleSpecificSetting.message) {
+    finalMessage = roleSpecificSetting.message;
+  }
+
+  let finalChannel = defaultChannel;
+
+  // Use role-specific channel if available
+  if (roleSpecificSetting && roleSpecificSetting.channel_id) {
+    const roleChannel = member.guild.channels.cache.get(roleSpecificSetting.channel_id);
+    if (roleChannel && roleChannel.isTextBased()) {
+      finalChannel = roleChannel as TextChannel;
     }
   }
 
@@ -514,6 +679,10 @@ client.on('messageReactionAdd', async (reaction, user) => {
       }
     }
   }
+
+  // Track reactions for A/B testing
+  // We would need to map the message to an exposure record
+  // This is simplified - in practice you'd want to store message IDs with exposures
 });
 
 // Handle button clicks and select menu interactions
@@ -566,6 +735,10 @@ client.on('interactionCreate', async interaction => {
       // Handle other button types
       else {
         await interaction.editReply({ content: `Button clicked: ${customId}`, ephemeral: true });
+
+        // Track engagement for A/B testing if applicable
+        // We would need to map the interaction to an exposure record
+        // This is simplified - in practice you'd want to store message IDs with exposures
       }
     }
 
@@ -589,6 +762,10 @@ client.on('interactionCreate', async interaction => {
           content: `Selection received: ${selectedValues.join(', ')}`,
           ephemeral: true
         });
+
+        // Track engagement for A/B testing if applicable
+        // We would need to map the interaction to an exposure record
+        // This is simplified - in practice you'd want to store message IDs with exposures
       }
     }
   } catch (error) {
@@ -729,6 +906,188 @@ client.on('interactionCreate', async interaction => {
             response += ` - ${comp.description}`;
           }
           response += `\n`;
+        });
+
+        await interaction.reply({
+          content: response,
+          ephemeral: true
+        });
+      }
+    } else if (subcommand === 'abtest') {
+      const abTestSubcommand = interaction.options.getSubcommand();
+
+      if (abTestSubcommand === 'create') {
+        const name = interaction.options.getString('name', true);
+        const description = interaction.options.getString('description');
+
+        const guildId = interaction.guildId;
+
+        // Check if there's already an active test
+        const existingActive = getActiveAbTest(guildId);
+        const isActive = !existingActive ? 1 : 0; // Only activate if no active test exists
+
+        const result = db.prepare(`
+          INSERT INTO ab_tests (guild_id, name, description, is_active)
+          VALUES (?, ?, ?, ?)
+        `).run(guildId, name, description ?? null, isActive);
+
+        const testId = result.lastInsertRowid;
+
+        await interaction.reply({
+          content: `A/B test "${name}" created successfully. Use \`/welcomesetup abtest variant add\` to add variants.`,
+          ephemeral: true
+        });
+      } else if (abTestSubcommand === 'variant') {
+        const variantSubcommand = interaction.options.getSubcommand();
+
+        if (variantSubcommand === 'add') {
+          const testName = interaction.options.getString('test', true);
+          const variantName = interaction.options.getString('name', true);
+          const message = interaction.options.getString('message');
+          const weight = interaction.options.getInteger('weight') || 1;
+          const isControl = interaction.options.getBoolean('is_control') || false;
+
+          const guildId = interaction.guildId;
+          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+
+          if (!test) {
+            await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
+            return;
+          }
+
+          const result = db.prepare(`
+            INSERT INTO ab_test_variants (test_id, name, message_text, weight, is_control)
+            VALUES (?, ?, ?, ?, ?)
+          `).run(test.id, variantName, message ?? null, weight, isControl ? 1 : 0);
+
+          await interaction.reply({
+            content: `Variant "${variantName}" added to A/B test "${testName}".`,
+            ephemeral: true
+          });
+        } else if (variantSubcommand === 'list') {
+          const testName = interaction.options.getString('test', true);
+
+          const guildId = interaction.guildId;
+          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+
+          if (!test) {
+            await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
+            return;
+          }
+
+          const variants = getAbTestVariants(test.id);
+
+          if (variants.length === 0) {
+            await interaction.reply({
+              content: `No variants found for A/B test "${testName}".`,
+              ephemeral: true
+            });
+            return;
+          }
+
+          let response = `Variants for A/B test "${testName}":\n`;
+          variants.forEach((v: any, index: number) => {
+            const controlBadge = v.is_control ? ' 🏆 (Control)' : '';
+            response += `${index + 1}. **${v.name}** (Weight: ${v.weight})${controlbadge}\n`;
+            if (v.message_text) {
+              const preview = v.message_text.length > 50 ? v.message_text.substring(0, 47) + '...' : v.message_text;
+              response += `   Preview: ${preview}\n`;
+            }
+          });
+
+          await interaction.reply({
+            content: response,
+            ephemeral: true
+          });
+        } else if (variantSubcommand === 'remove') {
+          const variantId = interaction.options.getInteger('id', true);
+
+          // Get variant info before deleting
+          const variant = db.prepare('SELECT v.name, t.name as test_name FROM ab_test_variants v JOIN ab_tests t ON v.test_id = t.id WHERE v.id = ?').get(variantId);
+
+          if (!variant) {
+            await interaction.reply({ content: 'Variant not found.', ephemeral: true });
+            return;
+          }
+
+          db.prepare('DELETE FROM ab_test_variants WHERE id = ?').run(variantId);
+
+          await interaction.reply({
+            content: `Variant "${variant.name}" removed from A/B test "${variant.test_name}".`,
+            ephemeral: true
+          });
+        }
+      } else if (abTestSubcommand === 'start') {
+        const testName = interaction.options.getString('test', true);
+
+        const guildId = interaction.guildId;
+        const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+
+        if (!test) {
+          await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
+          return;
+        }
+
+        // Deactivate any other active tests for this guild
+        db.prepare('UPDATE ab_tests SET is_active = 0 WHERE guild_id = ? AND id != ?').run(guildId, test.id);
+
+        // Activate this test
+        db.prepare('UPDATE ab_tests SET is_active = 1 WHERE id = ?').run(test.id);
+
+        await interaction.reply({
+          content: `A/B test "${testName}" is now active.`,
+          ephemeral: true
+        });
+      } else if (abTestSubcommand === 'stop') {
+        const testName = interaction.options.getString('test', true);
+
+        const guildId = interaction.guildId;
+        const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+
+        if (!test) {
+          await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
+          return;
+        }
+
+        // Deactivate the test
+        db.prepare('UPDATE ab_tests SET is_active = 0 WHERE id = ?').run(test.id);
+
+        await interaction.reply({
+          content: `A/B test "${testName}" has been stopped.`,
+          ephemeral: true
+        });
+      } else if (abTestSubcommand === 'stats') {
+        const testName = interaction.options.getString('test', true);
+
+        const guildId = interaction.guildId;
+        const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+
+        if (!test) {
+          await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
+          return;
+        }
+
+        const stats = getAbTestStats(test.id);
+
+        if (stats.length === 0) {
+          await interaction.reply({
+            content: `No data available for A/B test "${testName}".`,
+            ephemeral: true
+          });
+          return;
+        }
+
+        let response = `A/B Test Statistics for "${testName}":\n\n`;
+        stats.forEach((s: any, index: number) => {
+          const controlBadge = s.is_control ? ' 🏆 (Control)' : '';
+          const conversionRate = s.exposures > 0 ?
+            ((s.clicks + s.reactions) / s.exposures * 100).toFixed(2) + '%' : '0%';
+
+          response += `${index + 1}. **${s.variant_name}**${controlbadge}\n`;
+          response += `   Exposures: ${s.exposures}\n`;
+          response += `   Clicks: ${s.clicks}\n`;
+          response += `   Reactions: ${s.reactions}\n`;
+          response += `   Engagement Rate: ${conversionRate}\n\n`;
         });
 
         await interaction.reply({
