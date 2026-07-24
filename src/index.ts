@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Partials, GuildMember, TextChannel, Role, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ChannelType, PermissionFlagsBits } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, GuildMember, TextChannel, Role, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ChannelType, PermissionFlagsBits, Invite } from 'discord.js';
 import dotenv from 'dotenv';
 import Database from 'better-sqlite3';
 import { Canvas, loadImage } from '@napi-rs/canvas';
@@ -76,7 +76,7 @@ db.exec(`
 db.exec(`
   CREATE TABLE IF NOT EXISTS ab_test_variants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    test_id INTEGER NOT NULL,
+    test_id INTEGER NOT NOT NULL,
     name TEXT NOT NULL,
     message_text TEXT,
     weight INTEGER DEFAULT 1, -- Higher weight = more likely to be shown
@@ -87,7 +87,7 @@ db.exec(`
 `);
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS ab_test_exposures (
+  CREATE TABLE IF NOT EXISTS IF EXISTS ab_test_exposures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     test_id INTEGER NOT NULL,
     variant_id INTEGER NOT NULL,
@@ -101,6 +101,46 @@ db.exec(`
   )
 `);
 
+// Invite Tracking Tables
+db.exec(`
+  CREATE TABLE IF NOT EXISTS invite_tracking (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    invite_code TEXT NOT NULL,
+    inviter_id TEXT, -- The user who created the invite
+    uses INTEGER DEFAULT 0,
+    max_uses INTEGER,
+    temporary BOOLEAN DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    UNIQUE(guild_id, invite_code)
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS invite_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invite_code TEXT NOT NULL,
+    user_id TEXT NOT NULL, -- The user who used the invite
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    guild_id TEXT NOT NULL,
+    FOREIGN KEY (invite_code) REFERENCES invite_tracking(invite_code) ON DELETE CASCADE
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS suspicious_invites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    invite_code TEXT NOT NULL,
+    reason TEXT NOT NULL, -- Reason for flagging (e.g., 'rapid_joins', 'suspicious_accounts')
+    detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active BOOLEAN DEFAULT 1, -- Whether we're still monitoring this
+    action_taken BOOLEAN DEFAULT 0, -- Whether we've taken action (deleted, etc.)
+    UNIQUE(guild_id, invite_code)
+  )
+`);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,      // For guild-related events
@@ -108,9 +148,14 @@ const client = new Client({
     GatewayIntentBits.GuildMessageReactions, // For reaction tracking
     GatewayIntentBits.DirectMessages, // For DM reactions
     GatewayIntentBits.GuildMessageTyping, // For typing indicators (engagement)
+    GatewayIntentBits.GuildInvites, // For invite tracking
+    GatewayIntentBits.GuildScheduledEvents, // For scheduled events
   ],
-  partials: [Partials.User, Partials.GuildMember, Partials.Channel, Partials.Message, Partials.Reaction, Partials.GuildScheduledEvent], // Helps with uncached members/channels/messages/reactions/events
+  partials: [Partials.User, Partials.GuildMember, Partials.Channel, Partials.Message, Partials.Reaction, Partials.GuildScheduledInvite], // Helps with uncached members/channels/messages/reactions/events/invites
 });
+
+// Cache for invites to track usage
+const inviteCache = new Map();
 
 // Welcome message template: can be customized via WELCOME_MESSAGE env var
 // Placeholders: {user} = username, {mention} = member mention, {server} = guild name
@@ -141,7 +186,7 @@ function getWelcomeSettings(guildId: string) {
 }
 
 // Function to set welcome settings for a guild
-function setWelcomeSettings(guildId: string, backgroundImage: string | null, enabled: boolean): void {
+function setWelcomeSettings(ggid: string, backgroundImage: string | null, enabled: boolean): void {
   db.prepare(`
     INSERT OR REPLACE INTO welcome_settings (guild_id, background_image, enabled)
     VALUES (?, ?, ?)
@@ -149,12 +194,12 @@ function setWelcomeSettings(guildId: string, backgroundImage: string | null, ena
 }
 
 // Function to get role-specific welcome settings
-function getRoleWelcomeSettings(guildId: string, roleId: string) {
+function getRoleWelcomeSettings(ggid: string, roleId: string) {
   return db.prepare('SELECT * FROM role_welcome_settings WHERE guild_id = ? AND role_id = ? AND enabled = 1').get(guildId, roleId);
 }
 
 // Function to set role-specific welcome settings
-function setRoleWelcomeSettings(guildId: string, roleId: string, message: string | null, channelId: string | null, enabled: boolean): void {
+function setRoleWelcomeSettings(ggid: string, roleId: string, message: string | null, channelId: string | null, enabled: boolean): void {
   db.prepare(`
     INSERT OR REPLACE INTO role_welcome_settings (guild_id, role_id, message, channel_id, enabled)
     VALUES (?, ?, ?, ?, ?)
@@ -267,6 +312,234 @@ function getAbTestStats(testId: number) {
   `).all(testId);
 }
 
+// Function to initialize invite tracking for a guild
+async function initializeInviteTracking(guildId: string) {
+  try {
+    const invites = await client.guilds.cache.get(guildId)?.invites.fetch() || new Collection();
+
+    invites.forEach(invite => {
+      // Store invite in database if not already present
+      const existing = db.prepare('SELECT * FROM invite_tracking WHERE guild_id = ? AND invite_code = ?').get(guildId, invite.code);
+
+      if (!existing) {
+        db.prepare(`
+          INSERT INTO invite_tracking (guild_id, invite_code, inviter_id, uses, max_uses, temporary, created_at, expires_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          guildId,
+          invite.code,
+          invite.inviter ? invite.inviter.id : null,
+          invite.uses,
+          invite.maxUses || 0,
+          invite.temporary ? 1 : 0,
+          invite.createdAt?.toISOString() || null,
+          invite.expiresAt?.toISOString() || null
+        );
+      }
+
+      // Update cache
+      inviteCache.set(invite.code, {
+        uses: invite.uses,
+        maxUses: invite.maxUses,
+        inviterId: invite.inviter ? invite.inviter.id : null,
+        createdAt: invite.createdAt,
+        expiresAt: invite.expiresAt
+      });
+    });
+  } catch (error) {
+    console.error('Error initializing invite tracking:', error);
+  }
+}
+
+// Function to update invite usage when a member joins
+async function handleInviteUsage(member: GuildMember) {
+  try {
+    // Get current invites
+    const newInvites = await member.guild.invoices.fetch() || new Collection();
+
+    // Check which invite was used by comparing with cache
+    const usedInvite = await findUsedInvite(member.guild.id, newInvites);
+
+    if (usedInvite) {
+      // Update invite usage in database
+      const inviteCode = usedInvite.code;
+
+      // Increment usage count in tracking table
+      db.prepare(`
+        UPDATE invite_tracking
+        SET uses = uses + 1
+        WHERE guild_id = ? AND invite_code = ?
+      `).run(member.guild.id, inviteCode);
+
+      // Record the usage
+      db.prepare(`
+        INSERT INTO invite_usage (invite_code, user_id, guild_id)
+        VALUES (?, ?, ?)
+      `).run(inviteCode, member.id, member.guild.id);
+
+      // Update cache
+      if (inviteCache.has(inviteCode)) {
+        const cached = inviteCache.get(inviteCode);
+        inviteCache.set(inviteCode, {
+          ...cached,
+          uses: (cached.uses || 0) + 1
+        });
+      }
+
+      // Check for suspicious activity
+      await checkForSuspiciousInvite(member.guild.id, inviteCode, member);
+    }
+
+    // Update cache with current invites
+    updateInviteCache(newInvites);
+  } catch (error) {
+    console.error('Error handling invite usage:', error);
+  }
+}
+
+// Function to find which invite was used by comparing old and new states
+async function findUsedInvite(guildId: string, newInvites: Collection<string, Invite>): Promise<Invite | null> {
+  try {
+    const cachedInvites = inviteCache.get(guildId) || new Map();
+
+    // Check for new invites or increased usage
+    for (const [code, invite] of newInvites) {
+      const cached = cachedInvites.get(code);
+
+      if (!cached) {
+        // New invite created
+        return invite;
+      }
+
+      if (invite.uses > (cached.uses || 0)) {
+        // Usage increased
+        return invite;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error finding used invite:', error);
+    return null;
+  }
+}
+
+// Function to update the invite cache
+function updateInviteCache(newInvites: Collection<string, Invite>) {
+  newInvites.forEach(invite => {
+    inviteCache.set(invite.code, {
+      uses: invite.uses,
+      maxUses: invite.maxUses,
+      inviterId: invite.inviter ? invite.inviter.id : null,
+      createdAt: invite.createdAt,
+      expiresAt: invite.expiresAt
+    });
+  });
+}
+
+// Function to check for suspicious invite patterns
+async function checkForSuspiciousInvite(guildId: string, inviteCode: string, member: GuildMember) {
+  try {
+    // Get usage stats for this invite
+    const usageCount = db.prepare(`
+      SELECT COUNT(*) as count FROM invite_usage
+      WHERE invite_code = ? AND guild_id = ?
+    `).get(inviteCode, guildId).count;
+
+    // Get recent usages (last hour)
+    const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
+    const recentUsage = db.prepare(`
+      SELECT COUNT(*) as count FROM invite_usage
+      WHERE invite_code = ? AND guild_id = ? AND joined_at > ?
+    `).get(inviteCode, guildId, oneHourAgo).count;
+
+    // Check if inviter is a recent account (potential alt)
+    const inviteInfo = db.prepare(`
+      SELECT inviter_id FROM invite_tracking
+      WHERE invite_code = ? AND guild_id = ?
+    `).get(inviteCode, guildId);
+
+    let isSuspect = false;
+    let reason = '';
+
+    // Rule 1: Too many joins in short time (potential raid)
+    if (recentUsage >= 5) { // 5 or more joins in an hour
+      isSuspect = true;
+      reason = 'rapid_joins';
+    }
+
+    // Rule 2: Inviter account is very new (potential alt)
+    if (inviteInfo && inviteInfo.inviter_id) {
+      const inviter = await guild.members.fetch(inviteInfo.invitor_id).catch(() => null);
+      if (inviter) {
+        const accountAge = Date.now() - inviter.user.createdTimestamp;
+        const oneWeekAgo = 7 * 24 * 60 * 60 * 1000; // 1 week in milliseconds
+
+        if (accountAge < oneWeekAgo) { // Account less than 1 week old
+          isSuspect = true;
+          reason = 'new_account_inviter';
+        }
+      }
+    }
+
+    // Rule 3: Suspicious pattern of alternate accounts joining
+    // Check if multiple recent joins have similar account ages
+    if (usageCount >= 3) {
+      const recentJoins = db.prepare(`
+        SELECT iu.user_id, iu.joined_at
+        FROM invite_usage iu
+        WHERE iu.invite_code = ? AND iu.guild_id = ?
+        ORDER BY iu.joined_at DESC
+        LIMIT 10
+      `).get(inviteCode, guildId);
+
+      // This would require more complex analysis - for now we'll skip this check
+    }
+
+    // If suspicious, flag it
+    if (isSuspect) {
+      // Check if already flagged
+      const existing = db.prepare(`
+        SELECT * FROM suspicious_invites
+        WHERE guild_id = ? AND invite_code = ? AND is_active = 1
+      `).get(guildId, inviteCode);
+
+      if (!existing) {
+        // Flag as suspicious
+        db.prepare(`
+          INSERT INTO suspicious_invites (guild_id, invite_code, reason)
+          VALUES (?, ?, ?)
+        `).run(guildId, inviteCode, reason);
+
+        // Log to console
+        console.log(`⚠️ Suspicious invite detected: ${inviteCode} (reason: ${reason})`);
+
+        # Consider auto-deleting the invite if it's highly suspicious
+        # if (reason === 'rapid_joins' && recentUsage >= 10) {
+        #   try {
+        #     const invite = await guild.invites.fetch(inviteCode);
+        #     if (invite) {
+        #       await invite.delete('Suspected raid or bot activity');
+        #       console.log(`🗑️ Deleted suspicious invite: ${inviteCode}`);
+        #
+        #       // Mark action as taken
+        #       db.prepare(`
+        #         UPDATE suspicious_invites
+        #         SET action_taken = 1
+        #         WHERE guild_id = ? AND invite_code = ?
+        #       `).run(guildId, inviteCode);
+        #     }
+        #   } catch (error) {
+        #     console.error(`Failed to delete suspicious invite ${inviteCode}:`, error);
+        #   }
+        # }
+      }
+    }
+  } catch (error) {
+    console.error('Error checking for suspicious invite:', error);
+  }
+}
+
 // Function to create a welcome card
 async function createWelcomeCard(member: GuildMember): Promise<Buffer> {
   const width = 1024;
@@ -348,7 +621,7 @@ async function createWelcomeCard(member: GuildMember): Promise<Buffer> {
   return canvas.encode('png');
 }
 
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`🤖 Bot is online as ${client.user?.tag}`);
 
   // Set bot status to online with a custom activity
@@ -356,6 +629,16 @@ client.once('ready', () => {
     activities: [{ name: 'welcoming new members', type: 0 }], // type 0 = Playing
     status: 'online',
   });
+
+  # Initialize invite tracking for all guilds the bot is in
+  for (const guild of client.guilds.cache.values()) {
+    await initializeInviteTracking(guild.id);
+  }
+});
+
+client.on('guildCreate', async (guild) => {
+  // Initialize invite tracking when bot joins a new guild
+  await initializeInviteTracking(guild.id);
 });
 
 client.on('guildMemberAdd', async (member: GuildMember) => {
@@ -375,6 +658,9 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
       console.error(`❌ Welcome channel with ID ${welcomeChannelId} not found or is not a text channel`);
       return;
     }
+
+    // Track invite usage for this member
+    await handleInviteUsage(member);
 
     // Get welcome settings for this guild
     const welcomeSettings = getWelcomeSettings(member.guild.id);
@@ -716,30 +1002,6 @@ client.on('interactionCreate', async interaction => {
           await interaction.editReply({ content: 'Role not found.', ephemeral: true });
         }
       }
-      // Handle rules agreement buttons
-      else if (customId === 'rules_accepted') {
-        // Give a "Verified" role or similar
-        const verifiedRole = interaction.guild?.roles.cache.find(r =>
-          r.name.toLowerCase().includes('verified') ||
-          r.name.toLowerCase().includes('member')
-        );
-
-        if (verifiedRole) {
-          const member = await interaction.guild.members.fetch(interaction.user.id);
-          await member.roles.add(verifiedRole.id);
-          await interaction.editReply({ content: 'You have been verified! Welcome to the community!', ephemeral: true });
-        } else {
-          await interaction.editReply({ content: 'Thank you for agreeing to the rules!', ephemeral: true });
-        }
-      }
-      // Handle other button types
-      else {
-        await interaction.editReply({ content: `Button clicked: ${customId}`, ephemeral: true });
-
-        // Track engagement for A/B testing if applicable
-        // We would need to map the interaction to an exposure record
-        // This is simplified - in practice you'd want to store message IDs with exposures
-      }
     }
 
     // Handle select menu interactions
@@ -762,10 +1024,6 @@ client.on('interactionCreate', async interaction => {
           content: `Selection received: ${selectedValues.join(', ')}`,
           ephemeral: true
         });
-
-        // Track engagement for A/B testing if applicable
-        // We would need to map the interaction to an exposure record
-        // This is simplified - in practice you'd want to store message IDs with exposures
       }
     }
   } catch (error) {
@@ -866,7 +1124,7 @@ client.on('interactionCreate', async interaction => {
         const maxPosRow = db.prepare('SELECT MAX(position) as maxPos FROM welcome_components WHERE guild_id = ?').get(guildId);
         const position = (maxPosRow.maxPos !== null ? maxPosRow.maxPos : -1) + 1;
 
-        addWelcomeComponent(guildId, 'select', label, customId, null, null, null, placeholder, minValues, maxValues, disabled, position);
+        addWelcomeComponent(guilId, 'select', label, customId, null, null, null, placeholder, minValues, maxValues, disabled, position);
 
         await interaction.reply({
           content: `Select menu "${label}" added to welcome message.`,
@@ -888,7 +1146,7 @@ client.on('interactionCreate', async interaction => {
         });
       } else if (componentType === 'list') {
         const guildId = interaction.guildId;
-        const components = getWelcomeComponents(guildId);
+        let components = getWelcomeComponents(guildId);
 
         if (components.length === 0) {
           await interaction.reply({
@@ -977,7 +1235,7 @@ client.on('interactionCreate', async interaction => {
 
           const variants = getAbTestVariants(test.id);
 
-          if (variants.length === 0) {
+          if (varks.length === 0) {
             await interaction.reply({
               content: `No variants found for A/B test "${testName}".`,
               ephemeral: true
@@ -1014,93 +1272,167 @@ client.on('interactionCreate', async interaction => {
 
           await interaction.reply({
             content: `Variant "${variant.name}" removed from A/B test "${variant.test_name}".`,
-            ephemeral: true
+            ephemral: true
           });
-        }
-      } else if (abTestSubcommand === 'start') {
-        const testName = interaction.options.getString('test', true);
+        } else if (vbatSubcommand === 'start') {
+          const testName = interaction.options.getString('test', true);
 
-        const guildId = interaction.guildId;
-        const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+          const guildId = interaction.guildId;
+          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(ggid, testName);
 
-        if (!test) {
-          await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
-          return;
-        }
+          if (!test) {
+            await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
+            return;
+          }
 
-        // Deactivate any other active tests for this guild
-        db.prepare('UPDATE ab_tests SET is_active = 0 WHERE guild_id = ? AND id != ?').run(guildId, test.id);
+          // Deactivate any other active tests for this guild
+          db.prepare('UPDATE ab_tests SET is_active = 0 WHERE guild_id = ? AND id != ?').run(guildId, test.id);
 
-        // Activate this test
-        db.prepare('UPDATE ab_tests SET is_active = 1 WHERE id = ?').run(test.id);
+          // Activate this test
+          db.prepare('UPDATE ab_tests SET is_active = 1 WHERE id = ?').run(test.id);
 
-        await interaction.reply({
-          content: `A/B test "${testName}" is now active.`,
-          ephemeral: true
-        });
-      } else if (abTestSubcommand === 'stop') {
-        const testName = interaction.options.getString('test', true);
-
-        const guildId = interaction.guildId;
-        const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
-
-        if (!test) {
-          await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
-          return;
-        }
-
-        // Deactivate the test
-        db.prepare('UPDATE ab_tests SET is_active = 0 WHERE id = ?').run(test.id);
-
-        await interaction.reply({
-          content: `A/B test "${testName}" has been stopped.`,
-          ephemeral: true
-        });
-      } else if (abTestSubcommand === 'stats') {
-        const testName = interaction.options.getString('test', true);
-
-        const guildId = interaction.guildId;
-        const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
-
-        if (!test) {
-          await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
-          return;
-        }
-
-        const stats = getAbTestStats(test.id);
-
-        if (stats.length === 0) {
           await interaction.reply({
-            content: `No data available for A/B test "${testName}".`,
+            content: `A/B test "${testName}" is now active.`,
             ephemeral: true
           });
-          return;
+        } else if (vbatSubcommand === 'stop') {
+          const testName = interaction.options.getString('test', true);
+
+          const guildId = interaction.guildId;
+          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+
+          if (!test) {
+            await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
+            return;
+          }
+
+          // Deactivate the test
+          db.prepare('UPDATE ab_tests SET is_active = 0 WHERE id = ?').run(test.id);
+
+          await interaction.reply({
+            content: `A/B test "${testName}" has been stopped.`,
+            ephemeral: true
+          });
+        } else if (vbatSubcommand === 'stats') {
+          const testName = interaction.options.getString('test', true);
+
+          const guildId = interaction.guildId;
+          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+
+          if (!test) {
+            await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
+            return;
+          }
+
+          const stats = getAbTestStats(test.id);
+
+          if (stats.length === 0) {
+            await interaction.reply({
+              content: `No data available for A/B test "${testName}".`,
+              ephemeral: true
+            });
+            return;
+          }
+
+          let response = `A/B Test Statistics for "${testName}":\n\n`;
+          stats.forEach((s: any, index: number) => {
+            const controlBadge = s.is_control ? ' 🏆 (Control)' : '';
+            const conversionRate = s.exposures > 0 ?
+              ((s.clicks + s.reactions) / s.exposures * 100).toFixed(2) + '%' : '0%';
+
+            response += `${index + 1}. **${s.variant_name}**${controlbadge}\n`;
+            response += `   Exposures: ${s.exposures}\n`;
+            response += `   Clicks: ${s.clicks}\n`;
+            response += `   Reactions: ${s.reactions}\n`;
+            response += `   Engagement Rate: ${conversionRate}\n\n`;
+          });
+
+          await interaction.reply({
+            content: response,
+            ephemeral: true
+          });
+        }
+      } else if (abTestSubcommand === 'background') {
+        // This would handle setting a custom background image
+        await interaction.reply({
+          content: 'Background image setting coming soon!',
+          ephemeral: true
+        });
+      }
+    } else if (subcommand === 'invite') {
+      const inviteSubcommand = interaction.options.getSubcommand();
+
+      if (inviteSubcommand === 'stats') {
+        const guildId = interaction.guildId;
+
+        // Get overall invite stats
+        const totalInvites = db.prepare('SELECT COUNT(*) as count FROM invite_tracking WHERE guild_id = ?').get(guildId).count;
+        const totalUses = db.prepare('SELECT SUM(uses) as total FROM invite_tracking WHERE guild_id = ?').get(guildId).total || 0;
+        const suspiciousCount = db.prepare('SELECT COUNT(*) as count FROM suspicious_invites WHERE guild_id = ? AND is_active = 1').get(guildId).count;
+
+        let response = `Invite Statistics for ${interaction.guild?.name}:\n\n`;
+        response += `Total Invites Tracked: ${totalInvites}\n`;
+        response += `Total Uses: ${totalUses}\n`;
+        response += `Suspicious Flags: ${suspiciousCount}\n\n`;
+
+        // Get top used invites
+        const topInvites = db.prepare(`
+          SELECT it.invite_code, it.uses, u.username as inviter_name
+          FROM invite_tracking it
+          LEFT JOIN users u ON it.inviter_id = u.id
+          WHERE it.guild_id = ?
+          ORDER BY it.uses DESC
+          LIMIT 5
+        `).all(guildId);
+
+        if (topInvites.length > 0) {
+          response += `Top Used Invites:\n`;
+          topInvites.forEach((invite: any, index: number) => {
+            response += `${index + 1}. ${invite.invite_code} - ${invite.uses} uses`;
+            if (invite.inviter_name) {
+              response += ` (by ${invite.inviter_name})`;
+            }
+            response += '\n';
+          });
         }
 
-        let response = `A/B Test Statistics for "${testName}":\n\n`;
-        stats.forEach((s: any, index: number) => {
-          const controlBadge = s.is_control ? ' 🏆 (Control)' : '';
-          const conversionRate = s.exposures > 0 ?
-            ((s.clicks + s.reactions) / s.exposures * 100).toFixed(2) + '%' : '0%';
+        // Get recent suspicious invites
+        const recentSuspicious = db.prepare(`
+          SELECT si.invite_code, si.reason, si.detected_at, u.username as inviter_name
+          FROM suspicious_invites si
+          LEFT JOIN invite_tracking it ON si.invite_code = it.invite_code AND si.guild_id = it.guild_id
+          LEFT JOIN users u ON it.inviter_id = u.id
+          WHERE si.guild_id = ? AND si.is_active = 1
+          ORDER BY si.detected_at DESC
+          LIMIT 5
+        `).all(guildId);
 
-          response += `${index + 1}. **${s.variant_name}**${controlbadge}\n`;
-          response += `   Exposures: ${s.exposures}\n`;
-          response += `   Clicks: ${s.clicks}\n`;
-          response += `   Reactions: ${s.reactions}\n`;
-          response += `   Engagement Rate: ${conversionRate}\n\n`;
-        });
+        if (recentSuspicious.length > 0) {
+          response += `\nRecent Suspicious Invites:\n`;
+          recentSuspicious.forEach((suspect: any, index: number) => {
+            response += `${index + 1}. ${suspect.invite_code} - ${suspect.reason}`;
+            if (suspect.inviter_name) {
+              response += ` (by ${suspect.inviter_name})`;
+            }
+            response += ` (${new Date(suspect.detected_at).toLocaleString()})\n`;
+          });
+        }
 
         await interaction.reply({
           content: response,
           ephemeral: true
         });
+      } else if (inviteSubcommand === 'reset') {
+        const guildId = interaction.guildId;
+
+        // Clear suspicious flags (but keep tracking data)
+        db.prepare('UPDATE suspicious_invites SET is_active = 0 WHERE guild_id = ?').run(guildId);
+
+        await interaction.reply({
+          content: 'Invite tracking data reset. All suspicious flags cleared.',
+          ephemeral: true
+        });
       }
-    } else if (subcommand === 'background') {
-      // This would handle setting a custom background image
-      await interaction.reply({
-        content: 'Background image setting coming soon!',
-        ephemeral: true
-      });
     }
   }
 });
