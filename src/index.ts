@@ -1,11 +1,13 @@
-import { Client, GatewayIntentBits, Partials, GuildMember, TextChannel } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, GuildMember, TextChannel, AttachmentBuilder } from 'discord.js';
 import dotenv from 'dotenv';
 import Database from 'better-sqlite3';
+import { Canvas, loadImage } from '@napi-rs/canvas';
+import { request } from 'undici';
 
 // Load environment variables from .env file
 dotenv.config();
 
-// Initialize SQLite database for storing user preferences
+// Initialize SQLite database for storing user preferences and settings
 const db = new Database('./welcomebot.db');
 
 // Initialize database tables
@@ -17,12 +19,21 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS welcome_settings (
+    guild_id TEXT PRIMARY KEY,
+    background_image TEXT,
+    enabled BOOLEAN DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,      // For guild-related events
     GatewayIntentBits.GuildMembers, // For guild member events (like guildMemberAdd)
   ],
-  partials: [Partials.User, Partials.GuildMember, Partials.Channel], // Helps with uncached members/channels
+  partials: [Partials.User, Partials.GuildMember, Partials.Channel, Partials.Message, Partials.Reaction], // Helps with uncached members/channels/messages/reactions
 });
 
 // Welcome message template: can be customized via WELCOME_MESSAGE env var
@@ -46,6 +57,100 @@ function setUserDMOptOut(userId: string, optOut: boolean): void {
     INSERT OR REPLACE INTO user_preferences (user_id, dm_opt_out)
     VALUES (?, ?)
   `).run(userId, optOut ? 1 : 0);
+}
+
+// Function to get welcome settings for a guild
+function getWelcomeSettings(guildId: string) {
+  return db.prepare('SELECT * FROM welcome_settings WHERE guild_id = ?').get(guildId);
+}
+
+// Function to set welcome settings for a guild
+function setWelcomeSettings(guildId: string, backgroundImage: string | null, enabled: boolean): void {
+  db.prepare(`
+    INSERT OR REPLACE INTO welcome_settings (guild_id, background_image, enabled)
+    VALUES (?, ?, ?)
+  `).run(guildId, backgroundImage ?? null, enabled ? 1 : 0);
+}
+
+// Function to create a welcome card
+async function createWelcomeCard(member: GuildMember): Promise<Buffer> {
+  const width = 1024;
+  const height = 500;
+
+  const canvas = Canvas.createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+
+  // Background gradient
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, '#1a1a2e');
+  gradient.addColorStop(1, '#16213e');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  // Get user avatar
+  let avatar;
+  try {
+    const avatarURL = member.user.displayAvatarURL({ extension: 'png', size: 256 });
+    const response = await request(avatarURL);
+    const arrayBuffer = await new Response(response.body).arrayBuffer();
+    avatar = await loadImage(Buffer.from(arrayBuffer));
+  } catch (error) {
+    console.error('Failed to load avatar:', error);
+    // Use default avatar if fetch fails
+    avatar = await loadImage(member.user.defaultAvatarURL);
+  }
+
+  // Draw avatar circle
+  const avatarSize = 200;
+  const avatarX = (width - avatarSize) / 2;
+  const avatarY = 80;
+
+  // Create circular clipping path for avatar
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(avatarX + avatarSize/2, avatarY + avatarSize/2, avatarSize/2, 0, Math.PI * 2);
+  ctx.close();
+  ctx.clip();
+
+  ctx.drawImage(avatar, avatarX, avatarY, avatarSize, avatarSize);
+  ctx.restore();
+
+  // Add stroke around avatar
+  ctx.strokeStyle = '#00bfff';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(avatarX + avatarSize/2, avatarY + avatarSize/2, avatarSize/2, 0, Math.PI * 2);
+  ctx.close();
+  ctx.stroke();
+
+  // Welcome text
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 48px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`Welcome to`, width/2, avatarY + avatarSize + 80);
+
+  ctx.font = 'bold 60px sans-serif';
+  ctx.fillText(member.user.username, width/2, avatarY + avatarSize + 150);
+
+  // Server name
+  ctx.fillStyle = '#87ceeb';
+  ctx.font = '28px sans-serif';
+  ctx.fillText(`Welcome to ${member.guild.name}`, width/2, avatarY + avatarSize + 200);
+
+  // Member count
+  ctx.fillStyle = '#ffd700';
+  ctx.font = '24px sans-serif';
+  ctx.fillText(`You are member #${member.guild.memberCount}`, width/2, avatarY + avatarSize + 250);
+
+  // Add some decorative elements
+  ctx.strokeStyle = '#00bfff';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(100, height - 50);
+  ctx.lineTo(width - 100, height - 50);
+  ctx.stroke();
+
+  return canvas.encode('png');
 }
 
 client.once('ready', () => {
@@ -76,15 +181,40 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
       return;
     }
 
-    // Prepare the welcome message by replacing placeholders
-    let welcomeMessage = WELCOME_MESSAGE_TEMPLATE;
-    welcomeMessage = welcomeMessage.replace('{user}', member.user.username);
-    welcomeMessage = welcomeMessage.replace('{mention}', member.toString());
-    welcomeMessage = welcomeMessage.replace('{server}', member.guild.name);
+    // Get welcome settings for this guild
+    const welcomeSettings = getWelcomeSettings(member.guild.id);
+    const welchannel = welcomeChannel;
 
-    // Send the welcome message to the channel
-    await welcomeChannel.send(welcomeMessage);
-    console.log(`✅ Sent welcome message to ${member.user.tag} in #${welcomeChannel.name}`);
+    // Check if welcome cards are enabled
+    const useWelcomeCard = welcomeSettings ? Boolean(welcomeSettings.enabled) : true;
+
+    if (useWelcomeCard) {
+      try {
+        // Generate welcome card
+        const welcomeCard = await createWelcomeCard(member);
+        const attachment = new AttachmentBuilder(welcomeCard, { name: 'welcome-card.png' });
+
+        // Prepare the welcome message by replacing placeholders
+        let welcomeMessage = WELCOME_MESSAGE_TEMPLATE;
+        welcomeMessage = welcomeMessage.replace('{user}', member.user.username);
+        welcomeMessage = welcomeMessage.replace('{mention}', member.toString());
+        welcomeMessage = welcomeMessage.replace('{server}', member.guild.name);
+
+        // Send the welcome message with the card
+        await welchannel.send({
+          content: welcomeMessage,
+          files: [attachment]
+        });
+        console.log(`✅ Sent welcome card to ${member.user.tag} in #${welchannel.name}`);
+      } catch (cardError) {
+        console.error(`❌ Failed to create/send welcome card for ${member.user.tag}:`, cardError);
+        // Fallback to regular welcome message
+        await sendRegularWelcome(welchannel, member);
+      }
+    } else {
+      // Send regular welcome message
+      await sendRegularWelcome(welchannel, member);
+    }
 
     // Send welcome DM if user hasn't opted out
     if (!hasUserOptedOutOfDMs(member.id)) {
@@ -131,12 +261,25 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
   }
 });
 
+// Helper function to send regular welcome message
+async function sendRegularWelcome(channel: TextChannel, member: GuildMember) {
+  // Prepare the welcome message by replacing placeholders
+  let welcomeMessage = WELCOME_MESSAGE_TEMPLATE;
+  welcomeMessage = welcomeMessage.replace('{user}', member.user.username);
+  welcomeMessage = welcomeMessage.replace('{mention}', member.toString());
+  welcomeMessage = welcomeMessage.replace('{server}', member.guild.name);
+
+  // Send the welcome message to the channel
+  await channel.send(welcomeMessage);
+  console.log(`✅ Sent welcome message to ${member.user.tag} in #${channel.name}`);
+}
+
 // Handle reactions to welcome DMs for opting back in
 client.on('messageReactionAdd', async (reaction, user) => {
   // Ignore bot reactions
   if (user.bot) return;
 
-  // Check if this is a reaction to a message we sent (we could store message IDs, but for simplicity)
+  // Check if this is a reaction to a message we sent
   // we'll check if it's a ✅ reaction on a DM from the bot
   if (reaction.emoji.name === '✅' && reaction.message.channel.type === 'dm') {
     // Check if the message is from our bot (by checking if it contains our welcome DM pattern)
@@ -148,6 +291,39 @@ client.on('messageReactionAdd', async (reaction, user) => {
       } catch (error) {
         console.error(`Failed to send opt-in confirmation to ${user.tag}:`, error);
       }
+    }
+  }
+});
+
+// Slash command handlers for admin features
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === 'welcomesetup') {
+    if (!interaction.memberPermissions?.has('Administrator')) {
+      await interaction.reply({ content: 'You need administrator permissions to use this command.', ephemeral: true });
+      return;
+    }
+
+    const subcommand = interaction.options.getSubcommand();
+
+    if (subcommand === 'toggle') {
+      const enabled = interaction.options.getBoolean('enabled');
+      const guildId = interaction.guildId;
+
+      const currentSettings = getWelcomeSettings(guildId) || { guild_id: guildId, background_image: null, enabled: true };
+      setWelcomeSettings(guildId, currentSettings.background_image, enabled);
+
+      await interaction.reply({
+        content: `Welcome cards have been ${enabled ? 'enabled' : 'disabled'} for this server.`,
+        ephemeral: true
+      });
+    } else if (subcommand === 'background') {
+      // This would handle setting a custom background image
+      await interaction.reply({
+        content: 'Background image setting coming soon!',
+        ephemeral: true
+      });
     }
   }
 });
