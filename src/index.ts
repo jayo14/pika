@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Partials, GuildMember, TextChannel, AttachmentBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, GuildMember, TextChannel, Role, AttachmentBuilder } from 'discord.js';
 import dotenv from 'dotenv';
 import Database from 'better-sqlite3';
 import { Canvas, loadImage } from '@napi-rs/canvas';
@@ -28,12 +28,24 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS role_welcome_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    role_id TEXT NOT NULL,
+    message TEXT,
+    channel_id TEXT,
+    enabled BOOLEAN DEFAULT 1,
+    UNIQUE(guild_id, role_id)
+  )
+`);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,      // For guild-related events
     GatewayIntentBits.GuildMembers, // For guild member events (like guildMemberAdd)
   ],
-  partials: [Partials.User, Partials.GuildMember, Partials.Channel, Partials.Message, Partials.Reaction], // Helps with uncached members/channels/messages/reactions
+  partials: [Partials.User, Partials.GuildMember, Partials.Channel, Partials.Message, Partials.Reaction, Partials.GuildScheduledEvent], // Helps with uncached members/channels/messages/reactions/events
 });
 
 // Welcome message template: can be customized via WELCOME_MESSAGE env var
@@ -70,6 +82,19 @@ function setWelcomeSettings(guildId: string, backgroundImage: string | null, ena
     INSERT OR REPLACE INTO welcome_settings (guild_id, background_image, enabled)
     VALUES (?, ?, ?)
   `).run(guildId, backgroundImage ?? null, enabled ? 1 : 0);
+}
+
+// Function to get role-specific welcome settings
+function getRoleWelcomeSettings(guildId: string, roleId: string) {
+  return db.prepare('SELECT * FROM role_welcome_settings WHERE guild_id = ? AND role_id = ? AND enabled = 1').get(guildId, roleId);
+}
+
+// Function to set role-specific welcome settings
+function setRoleWelcomeSettings(guildId: string, roleId: string, message: string | null, channelId: string | null, enabled: boolean): void {
+  db.prepare(`
+    INSERT OR REPLACE INTO role_welcome_settings (guild_id, role_id, message, channel_id, enabled)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(guildId, roleId, message ?? null, channelId ?? null, enabled ? 1 : 0);
 }
 
 // Function to create a welcome card
@@ -183,10 +208,26 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
 
     // Get welcome settings for this guild
     const welcomeSettings = getWelcomeSettings(member.guild.id);
-    const welchannel = welcomeChannel;
 
     // Check if welcome cards are enabled
     const useWelcomeCard = welcomeSettings ? Boolean(welcomeSettings.enabled) : true;
+
+    // Check for role-specific welcome settings
+    let roleSpecificSetting = null;
+    let highestPositionRole = null;
+    let highestPosition = -1;
+
+    // Check each role the member has (excluding @everyone)
+    for (const [roleId, role] of member.roles.cache) {
+      if (role.id === member.guild.id) continue; // Skip @everyone role
+
+      const roleSettings = getRoleWelcomeSettings(member.guild.id, role.id);
+      if (roleSettings && role.position > highestPosition) {
+        highestPosition = role.position;
+        highestPositionRole = role;
+        roleSpecificSetting = roleSettings;
+      }
+    }
 
     if (useWelcomeCard) {
       try {
@@ -194,26 +235,42 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
         const welcomeCard = await createWelcomeCard(member);
         const attachment = new AttachmentBuilder(welcomeCard, { name: 'welcome-card.png' });
 
-        // Prepare the welcome message by replacing placeholders
-        let welcomeMessage = WELCOME_MESSAGE_TEMPLATE;
-        welcomeMessage = welcomeMessage.replace('{user}', member.user.username);
-        welcomeMessage = welcomeMessage.replace('{mention}', member.toString());
-        welcomeMessage = welcomeMessage.replace('{server}', member.guild.name);
+        // Determine which message and channel to use
+        let finalMessage = WELCOME_MESSAGE_TEMPLATE;
+        let finalChannel = welcomeChannel;
+
+        // Use role-specific settings if available
+        if (roleSpecificSetting) {
+          if (roleSpecificSetting.message) {
+            finalMessage = roleSpecificSetting.message;
+          }
+          if (roleSpecificSetting.channel_id) {
+            const roleChannel = member.guild.channels.cache.get(roleSpecificSetting.channel_id);
+            if (roleChannel && roleChannel.isTextBased()) {
+              finalChannel = roleChannel as TextChannel;
+            }
+          }
+        }
+
+        // Replace placeholders in the message
+        finalMessage = finalMessage.replace('{user}', member.user.username);
+        finalMessage = finalMessage.replace('{mention}', member.toString());
+        finalMessage = finalMessage.replace('{server}', member.guild.name);
 
         // Send the welcome message with the card
-        await welchannel.send({
-          content: welcomeMessage,
+        await finalChannel.send({
+          content: finalMessage,
           files: [attachment]
         });
-        console.log(`✅ Sent welcome card to ${member.user.tag} in #${welchannel.name}`);
+        console.log(`✅ Sent welcome card to ${member.user.tag} in #${finalChannel.name}`);
       } catch (cardError) {
         console.error(`❌ Failed to create/send welcome card for ${member.user.tag}:`, cardError);
         // Fallback to regular welcome message
-        await sendRegularWelcome(welchannel, member);
+        await sendRegularWelcome(member, welcomeSettings, roleSpecificSetting, welcomeChannel);
       }
     } else {
       // Send regular welcome message
-      await sendRegularWelcome(welchannel, member);
+      await sendRegularWelcome(member, welcomeSettings, roleSpecificSetting, welcomeChannel);
     }
 
     // Send welcome DM if user hasn't opted out
@@ -262,16 +319,32 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
 });
 
 // Helper function to send regular welcome message
-async function sendRegularWelcome(channel: TextChannel, member: GuildMember) {
-  // Prepare the welcome message by replacing placeholders
-  let welcomeMessage = WELCOME_MESSAGE_TEMPLATE;
-  welcomeMessage = welcomeMessage.replace('{user}', member.user.username);
-  welcomeMessage = welcomeMessage.replace('{mention}', member.toString());
-  welcomeMessage = welcomeMessage.replace('{server}', member.guild.name);
+async function sendRegularWelcome(member: GuildMember, welcomeSettings: any, roleSpecificSetting: any, defaultChannel: TextChannel) {
+  // Determine which message and channel to use
+  let finalMessage = WELCOME_MESSAGE_TEMPLATE;
+  let finalChannel = defaultChannel;
+
+  // Use role-specific settings if available
+  if (roleSpecificSetting) {
+    if (roleSpecificSetting.message) {
+      finalMessage = roleSpecificSetting.message;
+    }
+    if (roleSpecificSetting.channel_id) {
+      const roleChannel = member.guild.channels.cache.get(roleSpecificSetting.channel_id);
+      if (roleChannel && roleChannel.isTextBased()) {
+        finalChannel = roleChannel as TextChannel;
+      }
+    }
+  }
+
+  // Replace placeholders in the message
+  finalMessage = finalMessage.replace('{user}', member.user.username);
+  finalMessage = finalMessage.replace('{mention}', member.toString());
+  finalMessage = finalMessage.replace('{server}', member.guild.name);
 
   // Send the welcome message to the channel
-  await channel.send(welcomeMessage);
-  console.log(`✅ Sent welcome message to ${member.user.tag} in #${channel.name}`);
+  await finalChannel.send(finalMessage);
+  console.log(`✅ Sent welcome message to ${member.user.tag} in #${finalChannel.name}`);
 }
 
 // Handle reactions to welcome DMs for opting back in
@@ -316,6 +389,26 @@ client.on('interactionCreate', async interaction => {
 
       await interaction.reply({
         content: `Welcome cards have been ${enabled ? 'enabled' : 'disabled'} for this server.`,
+        ephemeral: true
+      });
+    } else if (subcommand === 'role') {
+      const role = interaction.options.getRole('role');
+      const enabled = interaction.options.getBoolean('enabled');
+      const message = interaction.options.getString('message');
+      const channel = interaction.options.getChannel('channel');
+
+      if (!role) {
+        await interaction.reply({ content: 'Please specify a role.', ephemeral: true });
+        return;
+      }
+
+      const guildId = interaction.guildId;
+      const channelId = channel ? channel.id : null;
+
+      setRoleWelcomeSettings(guildId, role.id, message ?? null, channelId, enabled);
+
+      await interaction.reply({
+        content: `Welcome settings for role ${role.name} have been ${enabled ? 'enabled' : 'disabled'}.${message ? ' Message updated.' : ''}${channel ? ' Channel updated.' : ''}`,
         ephemeral: true
       });
     } else if (subcommand === 'background') {
