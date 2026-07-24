@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Partials, GuildMember, TextChannel, Role, AttachmentBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, GuildMember, TextChannel, Role, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ChannelType, PermissionFlagsBits } from 'discord.js';
 import dotenv from 'dotenv';
 import Database from 'better-sqlite3';
 import { Canvas, loadImage } from '@napi-rs/canvas';
@@ -40,10 +40,31 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS welcome_components (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    component_type TEXT NOT NULL, -- 'button' or 'select'
+    label TEXT NOT NULL,
+    value TEXT, -- For buttons: custom_id, for selects: the value
+    description TEXT, -- For selects: description of the option
+    emoji TEXT, -- For buttons: emoji name or id
+    style TEXT, -- For buttons: 'primary', 'secondary', 'success', 'danger'
+    placeholder TEXT, -- For selects: placeholder text
+    min_values INTEGER DEFAULT 1, -- For selects: minimum values
+    max_values INTEGER DEFAULT 1, -- For selects: maximum values
+    disabled BOOLEAN DEFAULT 0,
+    position INTEGER DEFAULT 0, -- Order in which components appear
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,      // For guild-related events
     GatewayIntentBits.GuildMembers, // For guild member events (like guildMemberAdd)
+    GatewayIntentBits.GuildMessageReactions, // For reaction tracking
+    GatewayIntentBits.DirectMessages, // For DM reactions
   ],
   partials: [Partials.User, Partials.GuildMember, Partials.Channel, Partials.Message, Partials.Reaction, Partials.GuildScheduledEvent], // Helps with uncached members/channels/messages/reactions/events
 });
@@ -95,6 +116,29 @@ function setRoleWelcomeSettings(guildId: string, roleId: string, message: string
     INSERT OR REPLACE INTO role_welcome_settings (guild_id, role_id, message, channel_id, enabled)
     VALUES (?, ?, ?, ?, ?)
   `).run(guildId, roleId, message ?? null, channelId ?? null, enabled ? 1 : 0);
+}
+
+// Function to get welcome components for a guild
+function getWelcomeComponents(guildId: string) {
+  return db.prepare('SELECT * FROM welcome_components WHERE guild_id = ? ORDER BY position').all(guildId);
+}
+
+// Function to add a welcome component
+function addWelcomeComponent(guildId: string, componentType: string, label: string, value: string | null, description: string | null, emoji: string | null, style: string | null, placeholder: string | null, minValues: number, maxValues: number, disabled: boolean, position: number): void {
+  db.prepare(`
+    INSERT INTO welcome_components (guild_id, component_type, label, value, description, emoji, style, placeholder, min_values, max_values, disabled, position)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(guildId, componentType, label, value ?? null, description ?? null, emoji ?? null, style ?? null, placeholder ?? null, minValues, maxValues, disabled ? 1 : 0, position);
+}
+
+// Function to remove a welcome component
+function removeWelcomeComponent(componentId: number): void {
+  db.prepare('DELETE FROM welcome_components WHERE id = ?').run(componentId);
+}
+
+// Function to clear all welcome components for a guild
+function clearWelcomeComponents(guildId: string): void {
+  db.prepare('DELETE FROM welcome_components WHERE guild_id = ?').run(guildId);
 }
 
 // Function to create a welcome card
@@ -229,6 +273,9 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
       }
     }
 
+    // Get welcome components for this guild
+    const welcomeComponents = getWelcomeComponents(member.guild.id);
+
     if (useWelcomeCard) {
       try {
         // Generate welcome card
@@ -257,20 +304,24 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
         finalMessage = finalMessage.replace('{mention}', member.toString());
         finalMessage = finalMessage.replace('{server}', member.guild.name);
 
-        // Send the welcome message with the card
+        // Build action rows from components
+        const actionRows = buildActionRows(welcomeComponents);
+
+        // Send the welcome message with the card and components
         await finalChannel.send({
           content: finalMessage,
-          files: [attachment]
+          files: [attachment],
+          components: actionRows
         });
         console.log(`✅ Sent welcome card to ${member.user.tag} in #${finalChannel.name}`);
       } catch (cardError) {
         console.error(`❌ Failed to create/send welcome card for ${member.user.tag}:`, cardError);
         // Fallback to regular welcome message
-        await sendRegularWelcome(member, welcomeSettings, roleSpecificSetting, welcomeChannel);
+        await sendRegularWelcome(member, welcomeSettings, roleSpecificSetting, welcomeChannel, welcomeComponents);
       }
     } else {
       // Send regular welcome message
-      await sendRegularWelcome(member, welcomeSettings, roleSpecificSetting, welcomeChannel);
+      await sendRegularWelcome(member, welcomeSettings, roleSpecificSetting, welcomeChannel, welcomeComponents);
     }
 
     // Send welcome DM if user hasn't opted out
@@ -318,8 +369,94 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
   }
 });
 
+// Helper function to build action rows from components
+function buildActionRows(components: any[]): any[] {
+  // Group components by row (max 5 components per row, max 5 rows)
+  const actionRows: any[] = [];
+  let currentRow: any[] = [];
+
+  for (const component of components) {
+    let componentBuilder;
+
+    if (component.component_type === 'button') {
+      const button = new ButtonBuilder()
+        .setCustomId(component.value || `button_${component.id}`)
+        .setLabel(component.label);
+
+      // Set style
+      switch (component.style) {
+        case 'primary':
+          button.setStyle(ButtonStyle.Primary);
+          break;
+        case 'secondary':
+          button.setStyle(ButtonStyle.Secondary);
+          break;
+        case 'success':
+          button.setStyle(ButtonStyle.Success);
+          break;
+        case 'danger':
+          button.setStyle(ButtonStyle.Danger);
+          break;
+        default:
+          button.setStyle(ButtonStyle.Primary);
+      }
+
+      // Set emoji if provided
+      if (component.emoji) {
+        button.setEmoji(component.emoji);
+      }
+
+      // Set disabled state
+      button.setDisabled(Boolean(component.disabled));
+
+      componentBuilder = button;
+    } else if (component.component_type === 'select') {
+      const select = new StringSelectMenuBuilder()
+        .setCustomId(component.value || `select_${component.id}`)
+        .setPlaceholder(component.placeholder || 'Select an option')
+        .setMinValues(component.min_values || 1)
+        .setMaxValues(component.max_values || 1)
+        .setDisabled(Boolean(component.disabled));
+
+      // For simplicity, we'll add a single option. In a real implementation,
+      // you might want to store options separately.
+      if (component.description) {
+        // Using label as the only option for simplicity
+        // In practice, you'd want to store multiple options per select menu
+        const optionLabel = component.label.length > 100 ? component.label.substring(0, 97) + '...' : component.label;
+        const optionDescription = component.description.length > 100 ? component.description.substring(0, 97) + '...' : component.description;
+        select.addOptions([
+          {
+            label: optionLabel,
+            value: component.value || `option_${component.id}`,
+            description: optionDescription
+          }
+        ]);
+      }
+
+      componentBuilder = select;
+    }
+
+    if (componentBuilder) {
+      // If current row has 5 components, start a new row
+      if (currentRow.length >= 5) {
+        actionRows.push(new ActionRowBuilder().addComponents(currentRow));
+        currentRow = [];
+      }
+      currentRow.push(componentBuilder);
+    }
+  }
+
+  // Add any remaining components to a new row
+  if (currentRow.length > 0) {
+    actionRows.push(new ActionRowBuilder().addComponents(currentRow));
+  }
+
+  return actionRows;
+}
+
 // Helper function to send regular welcome message
-async function sendRegularWelcome(member: GuildMember, welcomeSettings: any, roleSpecificSetting: any, defaultChannel: TextChannel) {
+async function sendRegularWelcome(member: GuildMember, welcomeSettings: any, roleSpecificSetting: any, defaultChannel: TextChannel, welcomeComponents: any[]) {
   // Determine which message and channel to use
   let finalMessage = WELCOME_MESSAGE_TEMPLATE;
   let finalChannel = defaultChannel;
@@ -342,8 +479,19 @@ async function sendRegularWelcome(member: GuildMember, welcomeSettings: any, rol
   finalMessage = finalMessage.replace('{mention}', member.toString());
   finalMessage = finalMessage.replace('{server}', member.guild.name);
 
+  // Build action rows from components
+  const actionRows = buildActionRows(welcomeComponents);
+
   // Send the welcome message to the channel
-  await finalChannel.send(finalMessage);
+  if (actionRows.length > 0) {
+    await finalChannel.send({
+      content: finalMessage,
+      components: actionRows
+    });
+  } else {
+    await finalChannel.send(finalMessage);
+  }
+
   console.log(`✅ Sent welcome message to ${member.user.tag} in #${finalChannel.name}`);
 }
 
@@ -368,12 +516,101 @@ client.on('messageReactionAdd', async (reaction, user) => {
   }
 });
 
+// Handle button clicks and select menu interactions
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
+
+  // Defer the reply to avoid interaction failure
+  await interaction.deferReply().catch(() => {}); // Ignore errors if interaction is already replied to
+
+  try {
+    // Handle button clicks
+    if (interaction.isButton()) {
+      const customId = interaction.customId;
+
+      // Handle role selection buttons
+      if (customId.startsWith('role_')) {
+        const roleId = customId.substring(5); // Remove 'role_' prefix
+        const role = interaction.guild?.roles.cache.get(roleId);
+
+        if (role) {
+          // Toggle the role
+          const member = await interaction.guild.members.fetch(interaction.user.id);
+          if (member.roles.cache.has(roleId)) {
+            await member.roles.remove(roleId);
+            await interaction.editReply({ content: `Removed the **${role.name}** role!`, ephemeral: true });
+          } else {
+            await member.roles.add(roleId);
+            await interaction.editReply({ content: `Added the **${role.name}** role!`, ephemeral: true });
+          }
+        } else {
+          await interaction.editReply({ content: 'Role not found.', ephemeral: true });
+        }
+      }
+      // Handle rules agreement buttons
+      else if (customId === 'rules_accepted') {
+        // Give a "Verified" role or similar
+        const verifiedRole = interaction.guild?.roles.cache.find(r =>
+          r.name.toLowerCase().includes('verified') ||
+          r.name.toLowerCase().includes('member')
+        );
+
+        if (verifiedRole) {
+          const member = await interaction.guild.members.fetch(interaction.user.id);
+          await member.roles.add(verifiedRole.id);
+          await interaction.editReply({ content: 'You have been verified! Welcome to the community!', ephemeral: true });
+        } else {
+          await interaction.editReply({ content: 'Thank you for agreeing to the rules!', ephemeral: true });
+        }
+      }
+      // Handle other button types
+      else {
+        await interaction.editReply({ content: `Button clicked: ${customId}`, ephemeral: true });
+      }
+    }
+
+    // Handle select menu interactions
+    else if (interaction.isStringSelectMenu()) {
+      const customId = interaction.customId;
+      const selectedValues = interaction.values;
+
+      // Handle role selection menus
+      if (customId.startsWith('role_select_')) {
+        // This would typically map to a set of roles based on selected values
+        // For simplicity, we'll just acknowledge the selection
+        await interaction.editReply({
+          content: `You have selected: ${selectedValues.join(', ')}`,
+          ephemeral: true
+        });
+      }
+      // Handle other select menus
+      else {
+        await interaction.editReply({
+          content: `Selection received: ${selectedValues.join(', ')}`,
+          ephemeral: true
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error handling interaction:', error);
+    try {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: 'An error occurred while processing your interaction.', ephemeral: true });
+      } else {
+        await interaction.editReply({ content: 'An error occurred while processing your interaction.' });
+      }
+    } catch (replyError) {
+      console.error('Failed to send error response:', replyError);
+    }
+  }
+});
+
 // Slash command handlers for admin features
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === 'welcomesetup') {
-    if (!interaction.memberPermissions?.has('Administrator')) {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
       await interaction.reply({ content: 'You need administrator permissions to use this command.', ephemeral: true });
       return;
     }
@@ -411,6 +648,94 @@ client.on('interactionCreate', async interaction => {
         content: `Welcome settings for role ${role.name} have been ${enabled ? 'enabled' : 'disabled'}.${message ? ' Message updated.' : ''}${channel ? ' Channel updated.' : ''}`,
         ephemeral: true
       });
+    } else if (subcommand === 'component') {
+      const componentType = interaction.options.getSubcommand();
+
+      if (componentType === 'button_add') {
+        const label = interaction.options.getString('label', true);
+        const customId = interaction.options.getString('custom_id');
+        const style = interaction.options.getString('style', false) || 'primary';
+        const emoji = interaction.options.getString('emoji');
+        const disabled = interaction.options.getBoolean('disabled') || false;
+
+        const guildId = interaction.guildId;
+        // Get next position
+        const maxPosRow = db.prepare('SELECT MAX(position) as maxPos FROM welcome_components WHERE guild_id = ?').get(guildId);
+        const position = (maxPosRow.maxPos !== null ? maxPosRow.maxPos : -1) + 1;
+
+        addWelcomeComponent(guildId, 'button', label, customId, null, emoji, style, null, 0, 0, disabled, position);
+
+        await interaction.reply({
+          content: `Button "${label}" added to welcome message.`,
+          ephemeral: true
+        });
+      } else if (componentType === 'button_remove') {
+        const componentId = interaction.options.getInteger('id', true);
+        removeWelcomeComponent(componentId);
+        await interaction.reply({
+          content: `Button component removed.`,
+          ephemeral: true
+        });
+      } else if (componentType === 'select_add') {
+        const label = interaction.options.getString('label', true);
+        const customId = interaction.options.getString('custom_id');
+        const placeholder = interaction.options.getString('placeholder');
+        const minValues = interaction.options.getInteger('min_values') || 1;
+        const maxValues = interaction.options.getInteger('max_values') || 1;
+        const disabled = interaction.options.getBoolean('disabled') || false;
+
+        const guildId = interaction.guildId;
+        // Get next position
+        const maxPosRow = db.prepare('SELECT MAX(position) as maxPos FROM welcome_components WHERE guild_id = ?').get(guildId);
+        const position = (maxPosRow.maxPos !== null ? maxPosRow.maxPos : -1) + 1;
+
+        addWelcomeComponent(guildId, 'select', label, customId, null, null, null, placeholder, minValues, maxValues, disabled, position);
+
+        await interaction.reply({
+          content: `Select menu "${label}" added to welcome message.`,
+          ephemeral: true
+        });
+      } else if (componentType === 'select_remove') {
+        const componentId = interaction.options.getInteger('id', true);
+        removeWelcomeComponent(componentId);
+        await interaction.reply({
+          content: `Select menu component removed.`,
+          ephemeral: true
+        });
+      } else if (componentType === 'clear') {
+        const guildId = interaction.guildId;
+        clearWelcomeComponents(guildId);
+        await interaction.reply({
+          content: `All welcome components cleared.`,
+          ephemeral: true
+        });
+      } else if (componentType === 'list') {
+        const guildId = interaction.guildId;
+        const components = getWelcomeComponents(guildId);
+
+        if (components.length === 0) {
+          await interaction.reply({
+            content: 'No welcome components configured.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        let response = 'Welcome Components:\n';
+        components.forEach((comp: any, index: number) => {
+          const typeEmoji = comp.component_type === 'button' ? '🔘' : '📋';
+          response += `${index + 1}. ${typeEmoji} **${comp.label}** (${comp.component_type})`;
+          if (comp.description) {
+            response += ` - ${comp.description}`;
+          }
+          response += `\n`;
+        });
+
+        await interaction.reply({
+          content: response,
+          ephemeral: true
+        });
+      }
     } else if (subcommand === 'background') {
       // This would handle setting a custom background image
       await interaction.reply({
