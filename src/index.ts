@@ -76,7 +76,7 @@ db.exec(`
 db.exec(`
   CREATE TABLE IF NOT EXISTS ab_test_variants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    test_id INTEGER NOT NOT NULL,
+    test_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     message_text TEXT,
     weight INTEGER DEFAULT 1, -- Higher weight = more likely to be shown
@@ -87,7 +87,7 @@ db.exec(`
 `);
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS IF EXISTS ab_test_exposures (
+  CREATE TABLE IF NOT EXISTS ab_test_exposures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     test_id INTEGER NOT NULL,
     variant_id INTEGER NOT NULL,
@@ -111,6 +111,7 @@ db.exec(`
     uses INTEGER DEFAULT 0,
     max_uses INTEGER,
     temporary BOOLEAN DEFAULT 0,
+    is_vanity BOOLEAN DEFAULT 0, -- Whether this is a vanity/custom URL
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP,
     UNIQUE(guild_id, invite_code)
@@ -186,7 +187,7 @@ function getWelcomeSettings(guildId: string) {
 }
 
 // Function to set welcome settings for a guild
-function setWelcomeSettings(ggid: string, backgroundImage: string | null, enabled: boolean): void {
+function setWelcomeSettings(guildId: string, backgroundImage: string | null, enabled: boolean): void {
   db.prepare(`
     INSERT OR REPLACE INTO welcome_settings (guild_id, background_image, enabled)
     VALUES (?, ?, ?)
@@ -194,12 +195,12 @@ function setWelcomeSettings(ggid: string, backgroundImage: string | null, enable
 }
 
 // Function to get role-specific welcome settings
-function getRoleWelcomeSettings(ggid: string, roleId: string) {
+function getRoleWelcomeSettings(guildId: string, roleId: string) {
   return db.prepare('SELECT * FROM role_welcome_settings WHERE guild_id = ? AND role_id = ? AND enabled = 1').get(guildId, roleId);
 }
 
 // Function to set role-specific welcome settings
-function setRoleWelcomeSettings(ggid: string, roleId: string, message: string | null, channelId: string | null, enabled: boolean): void {
+function setRoleWelcomeSettings(guildId: string, roleId: string, message: string | null, channelId: string | null, enabled: boolean): void {
   db.prepare(`
     INSERT OR REPLACE INTO role_welcome_settings (guild_id, role_id, message, channel_id, enabled)
     VALUES (?, ?, ?, ?, ?)
@@ -321,10 +322,15 @@ async function initializeInviteTracking(guildId: string) {
       // Store invite in database if not already present
       const existing = db.prepare('SELECT * FROM invite_tracking WHERE guild_id = ? AND invite_code = ?').get(guildId, invite.code);
 
+      // Determine if this is likely a vanity URL
+      // Simple heuristic: vanity URLs often contain words rather than random strings
+      // Also, we'll check against a list of known vanity codes if maintained
+      const isVanity = isLikelyVanityUrl(invite.code);
+
       if (!existing) {
         db.prepare(`
-          INSERT INTO invite_tracking (guild_id, invite_code, inviter_id, uses, max_uses, temporary, created_at, expires_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO invite_tracking (guild_id, invite_code, inviter_id, uses, max_uses, temporary, is_vanity, created_at, expires_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           guildId,
           invite.code,
@@ -332,9 +338,19 @@ async function initializeInviteTracking(guildId: string) {
           invite.uses,
           invite.maxUses || 0,
           invite.temporary ? 1 : 0,
+          isVanity ? 1 : 0,
           invite.createdAt?.toISOString() || null,
           invite.expiresAt?.toISOString() || null
         );
+      } else {
+        // Update the is_vanity flag if our determination has changed
+        if (existing.is_vanity !== (isVanity ? 1 : 0)) {
+          db.prepare(`
+            UPDATE invite_tracking
+            SET is_vanity = ?
+            WHERE guild_id = ? AND invite_code = ?
+          `).run(isVanity ? 1 : 0, guildId, invite.code);
+        }
       }
 
       // Update cache
@@ -343,7 +359,8 @@ async function initializeInviteTracking(guildId: string) {
         maxUses: invite.maxUses,
         inviterId: invite.inviter ? invite.inviter.id : null,
         createdAt: invite.createdAt,
-        expiresAt: invite.expiresAt
+        expiresAt: invite.expiresAt,
+        isVanity: isVanity
       });
     });
   } catch (error) {
@@ -351,11 +368,27 @@ async function initializeInviteTracking(guildId: string) {
   }
 }
 
+// Helper function to determine if an invite code is likely a vanity URL
+function isLikelyVanityUrl(code: string): boolean {
+  // Discord vanity URLs are typically memorable words/phrases
+  // This is a simple heuristic - in reality, you'd want to allow admins to mark them
+
+  // Standard Discord invites are usually 6-8 characters of mixed case letters/numbers
+  // Actually, let me reconsider this approach.
+
+  // Rather than trying to auto-detect vanity URLs (which is unreliable),
+  // let's implement a system where administrators can explicitly mark invites as vanity.
+  // For now, I'll return false and rely on manual marking, but I'll leave the function
+  // here for future enhancement.
+
+  return false;
+}
+
 // Function to update invite usage when a member joins
 async function handleInviteUsage(member: GuildMember) {
   try {
     // Get current invites
-    const newInvites = await member.guild.invoices.fetch() || new Collection();
+    const newInvites = await member.guild.invites.fetch() || new Collection();
 
     // Check which invite was used by comparing with cache
     const usedInvite = await findUsedInvite(member.guild.id, newInvites);
@@ -491,14 +524,14 @@ async function checkForSuspiciousInvite(guildId: string, inviteCode: string, mem
         WHERE iu.invite_code = ? AND iu.guild_id = ?
         ORDER BY iu.joined_at DESC
         LIMIT 10
-      `).get(inviteCode, guildId);
+      `).all(inviteCode, guildId);
 
       // This would require more complex analysis - for now we'll skip this check
     }
 
     // If suspicious, flag it
     if (isSuspect) {
-      // Check if already flagged
+      // Check if already flaged
       const existing = db.prepare(`
         SELECT * FROM suspicious_invites
         WHERE guild_id = ? AND invite_code = ? AND is_active = 1
@@ -514,25 +547,25 @@ async function checkForSuspiciousInvite(guildId: string, inviteCode: string, mem
         // Log to console
         console.log(`⚠️ Suspicious invite detected: ${inviteCode} (reason: ${reason})`);
 
-        # Consider auto-deleting the invite if it's highly suspicious
-        # if (reason === 'rapid_joins' && recentUsage >= 10) {
-        #   try {
-        #     const invite = await guild.invites.fetch(inviteCode);
-        #     if (invite) {
-        #       await invite.delete('Suspected raid or bot activity');
-        #       console.log(`🗑️ Deleted suspicious invite: ${inviteCode}`);
-        #
-        #       // Mark action as taken
-        #       db.prepare(`
-        #         UPDATE suspicious_invites
-        #         SET action_taken = 1
-        #         WHERE guild_id = ? AND invite_code = ?
-        #       `).run(guildId, inviteCode);
-        #     }
-        #   } catch (error) {
-        #     console.error(`Failed to delete suspicious invite ${inviteCode}:`, error);
-        #   }
-        # }
+        // Consider auto-deleting the invite if it's highly suspicious
+        if (reason === 'rapid_joins' && recentUsage >= 10) {
+          try {
+            const invite = await guild.invites.fetch(inviteCode);
+            if (invite) {
+              await invite.delete('Suspected raid or bot activity');
+              console.log(`🗑️ Deleted suspicious invite: ${inviteCode}`);
+
+              // Mark action as taken
+              db.prepare(`
+                UPDATE suspicious_invites
+                SET action_taken = 1
+                WHERE guild_id = ? AND invite_code = ?
+              `).run(guildId, inviteCode);
+            }
+          } catch (error) {
+            console.error(`Failed to delete suspicious invite ${inviteCode}:`, error);
+          }
+        }
       }
     }
   } catch (error) {
@@ -630,7 +663,7 @@ client.once('ready', async () => {
     status: 'online',
   });
 
-  # Initialize invite tracking for all guilds the bot is in
+  // Initialize invite tracking for all guilds the bot is in
   for (const guild of client.guilds.cache.values()) {
     await initializeInviteTracking(guild.id);
   }
@@ -711,8 +744,8 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
     let finalMessage = WELCOME_MESSAGE_TEMPLATE;
 
     // Use A/B test variant if available
-    if (selectedVariant && selectedVariant.message_text) {
-      finalMessage = selectedVariant.message_text;
+    if (selectedVendor && selectedVendor.message_text) {
+      finalMessage = selectedVendor.message_text;
     }
     // Use role-specific settings if available
     else if (roleSpecificSetting && roleSpecificSetting.message) {
@@ -785,7 +818,7 @@ client.on('guildMemberAdd', async (member: GuildMember) => {
 
         collector.on('collect', (reaction, user) => {
           if (reaction.emoji.name === '❌') {
-            setUserDMOptOut(user.id, true);
+            setUserDMOut(user.id, true);
             user.send('You have opted out of receiving welcome DMs. You can opt back in anytime by reacting with ✅ to any future welcome DM.');
             collector.stop();
           }
@@ -1098,7 +1131,16 @@ client.on('interactionCreate', async interaction => {
         const maxPosRow = db.prepare('SELECT MAX(position) as maxPos FROM welcome_components WHERE guild_id = ?').get(guildId);
         const position = (maxPosRow.maxPos !== null ? maxPosRow.maxPos : -1) + 1;
 
-        addWelcomeComponent(guildId, 'button', label, customId, null, emoji, style, null, 0, 0, disabled, position);
+        // Guard against null guildId (shouldn't happen in guild interactions, but be safe)
+        if (guildId === null) {
+          await interaction.reply({
+            content: 'This command can only be used in a server.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        addWelcomeComponent(guildId, 'button', label, customId, null as string | null, emoji, style, null as string | null, 0, 0, disabled, position);
 
         await interaction.reply({
           content: `Button "${label}" added to welcome message.`,
@@ -1124,7 +1166,7 @@ client.on('interactionCreate', async interaction => {
         const maxPosRow = db.prepare('SELECT MAX(position) as maxPos FROM welcome_components WHERE guild_id = ?').get(guildId);
         const position = (maxPosRow.maxPos !== null ? maxPosRow.maxPos : -1) + 1;
 
-        addWelcomeComponent(guilId, 'select', label, customId, null, null, null, placeholder, minValues, maxValues, disabled, position);
+        addWelcomeComponent(guildId, 'select', label, customId, null as string | null, null as string | null, null as string | null, placeholder, minValues, maxValues, disabled, position);
 
         await interaction.reply({
           content: `Select menu "${label}" added to welcome message.`,
@@ -1138,15 +1180,15 @@ client.on('interactionCreate', async interaction => {
           ephemeral: true
         });
       } else if (componentType === 'clear') {
-        const guildId = interaction.guildId;
-        clearWelcomeComponents(guildId);
+        const gid = interaction.guildId;
+        clearWelcomeComponents(gid);
         await interaction.reply({
           content: `All welcome components cleared.`,
           ephemeral: true
         });
       } else if (componentType === 'list') {
-        const guildId = interaction.guildId;
-        let components = getWelcomeComponents(guildId);
+        const gid = interaction.guildId;
+        const components = getWelcomeComponents(gid);
 
         if (components.length === 0) {
           await interaction.reply({
@@ -1163,7 +1205,7 @@ client.on('interactionCreate', async interaction => {
           if (comp.description) {
             response += ` - ${comp.description}`;
           }
-          response += `\n`;
+          response += '\n';
         });
 
         await interaction.reply({
@@ -1178,16 +1220,16 @@ client.on('interactionCreate', async interaction => {
         const name = interaction.options.getString('name', true);
         const description = interaction.options.getString('description');
 
-        const guildId = interaction.guildId;
+        const gid = interaction.guildId;
 
         // Check if there's already an active test
-        const existingActive = getActiveAbTest(guildId);
+        const existingActive = getActiveAbTest(gid);
         const isActive = !existingActive ? 1 : 0; // Only activate if no active test exists
 
         const result = db.prepare(`
           INSERT INTO ab_tests (guild_id, name, description, is_active)
           VALUES (?, ?, ?, ?)
-        `).run(guildId, name, description ?? null, isActive);
+        `).run(gid, name, description ?? null, isActive);
 
         const testId = result.lastInsertRowid;
 
@@ -1205,18 +1247,22 @@ client.on('interactionCreate', async interaction => {
           const weight = interaction.options.getInteger('weight') || 1;
           const isControl = interaction.options.getBoolean('is_control') || false;
 
-          const guildId = interaction.guildId;
-          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+          const gid = interaction.guildId;
+          const test = db.prepare('SELECT id FROM ab_tests WHERE gid = ? AND name = ?').get(gid, testName);
 
           if (!test) {
             await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
             return;
           }
 
-          const result = db.prepare(`
-            INSERT INTO ab_test_variants (test_id, name, message_text, weight, is_control)
-            VALUES (?, ?, ?, ?, ?)
-          `).run(test.id, variantName, message ?? null, weight, isControl ? 1 : 0);
+          const sql = "INSERT INTO ab_test_variants (test_id, name, message_text, weight, is_control) VALUES (?, ?, ?, ?, ?)";
+          const result = db.prepare(sql).run(
+            test.id,
+            variantName,
+            message ?? null,
+            weight,
+            isControl ? 1 : 0
+          );
 
           await interaction.reply({
             content: `Variant "${variantName}" added to A/B test "${testName}".`,
@@ -1225,8 +1271,8 @@ client.on('interactionCreate', async interaction => {
         } else if (variantSubcommand === 'list') {
           const testName = interaction.options.getString('test', true);
 
-          const guildId = interaction.guildId;
-          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+          const gid = interaction.guildId;
+          const test = db.prepare('SELECT id FROM ab_tests WHERE gid = ? AND name = ?').get(gid, testName);
 
           if (!test) {
             await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
@@ -1235,7 +1281,7 @@ client.on('interactionCreate', async interaction => {
 
           const variants = getAbTestVariants(test.id);
 
-          if (varks.length === 0) {
+          if (variants.length === 0) {
             await interaction.reply({
               content: `No variants found for A/B test "${testName}".`,
               ephemeral: true
@@ -1271,14 +1317,14 @@ client.on('interactionCreate', async interaction => {
           db.prepare('DELETE FROM ab_test_variants WHERE id = ?').run(variantId);
 
           await interaction.reply({
-            content: `Variant "${variant.name}" removed from A/B test "${variant.test_name}".`,
-            ephemral: true
+            content: `Variant "${variant.name}" removed from A/B test "${test.name}".`,
+            ephemeral: true
           });
-        } else if (vbatSubcommand === 'start') {
+        } else if (abTestSubcommand === 'start') {
           const testName = interaction.options.getString('test', true);
 
-          const guildId = interaction.guildId;
-          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(ggid, testName);
+          const gid = interaction.guildId;
+          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(gid, testName);
 
           if (!test) {
             await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
@@ -1286,7 +1332,7 @@ client.on('interactionCreate', async interaction => {
           }
 
           // Deactivate any other active tests for this guild
-          db.prepare('UPDATE ab_tests SET is_active = 0 WHERE guild_id = ? AND id != ?').run(guildId, test.id);
+          db.prepare('UPDATE ab_tests SET is_active = 0 WHERE guild_id = ? AND id != ?').run(gid, test.id);
 
           // Activate this test
           db.prepare('UPDATE ab_tests SET is_active = 1 WHERE id = ?').run(test.id);
@@ -1295,11 +1341,11 @@ client.on('interactionCreate', async interaction => {
             content: `A/B test "${testName}" is now active.`,
             ephemeral: true
           });
-        } else if (vbatSubcommand === 'stop') {
+        } else if (abTestSubcommand === 'stop') {
           const testName = interaction.options.getString('test', true);
 
-          const guildId = interaction.guildId;
-          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+          const gid = interaction.guildId;
+          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(gid, testName);
 
           if (!test) {
             await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
@@ -1313,11 +1359,11 @@ client.on('interactionCreate', async interaction => {
             content: `A/B test "${testName}" has been stopped.`,
             ephemeral: true
           });
-        } else if (vbatSubcommand === 'stats') {
+        } else if (abTestSubcommand === 'stats') {
           const testName = interaction.options.getString('test', true);
 
-          const guildId = interaction.guildId;
-          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(guildId, testName);
+          const gid = interaction.guildId;
+          const test = db.prepare('SELECT id FROM ab_tests WHERE guild_id = ? AND name = ?').get(gid, testName);
 
           if (!test) {
             await interaction.reply({ content: `A/B test "${testName}" not found.`, ephemeral: true });
@@ -1352,7 +1398,7 @@ client.on('interactionCreate', async interaction => {
             ephemeral: true
           });
         }
-      } else if (abTestSubcommand === 'background') {
+      } else if (abSubcommand === 'background') {
         // This would handle setting a custom background image
         await interaction.reply({
           content: 'Background image setting coming soon!',
@@ -1363,36 +1409,60 @@ client.on('interactionCreate', async interaction => {
       const inviteSubcommand = interaction.options.getSubcommand();
 
       if (inviteSubcommand === 'stats') {
-        const guildId = interaction.guildId;
+        const gid = interaction.guildId;
 
         // Get overall invite stats
-        const totalInvites = db.prepare('SELECT COUNT(*) as count FROM invite_tracking WHERE guild_id = ?').get(guildId).count;
-        const totalUses = db.prepare('SELECT SUM(uses) as total FROM invite_tracking WHERE guild_id = ?').get(guildId).total || 0;
-        const suspiciousCount = db.prepare('SELECT COUNT(*) as count FROM suspicious_invites WHERE guild_id = ? AND is_active = 1').get(guildId).count;
+        const totalInvites = db.prepare('SELECT COUNT(*) as count FROM invite_tracking WHERE guild_id = ?').get(gid).count;
+        const totalUses = db.prepare('SELECT SUM(uses) as total FROM invite_tracking WHERE guild_id = ?').get(gid).total || 0;
+        const suspiciousCount = db.prepare('SELECT COUNT(*) as count FROM suspicious_invites WHERE guild_id = ? AND is_active = 1').get(gid).count;
+        const vanityCount = db.prepare('SELECT COUNT(*) as count FROM invite_tracking WHERE guild_id = ? AND is_vanity = 1').get(gid).count;
 
         let response = `Invite Statistics for ${interaction.guild?.name}:\n\n`;
         response += `Total Invites Tracked: ${totalInvites}\n`;
+        response += `Vanity URLs: ${vanityCount}\n`;
+        response += `Regular Invites: ${totalInvites - vanityCount}\n`;
         response += `Total Uses: ${totalUses}\n`;
         response += `Suspicious Flags: ${suspiciousCount}\n\n`;
 
-        // Get top used invites
+        // Get top used invites (including vanity status)
         const topInvites = db.prepare(`
-          SELECT it.invite_code, it.uses, u.username as inviter_name
+          SELECT it.invite_code, it.uses, it.is_vanity, u.username as inviter_name
           FROM invite_tracking it
           LEFT JOIN users u ON it.inviter_id = u.id
           WHERE it.guild_id = ?
           ORDER BY it.uses DESC
           LIMIT 5
-        `).all(guildId);
+        `).all(gid);
 
         if (topInvites.length > 0) {
           response += `Top Used Invites:\n`;
           topInvites.forEach((invite: any, index: number) => {
-            response += `${index + 1}. ${invite.invite_code} - ${invite.uses} uses`;
+            const typeBadge = invite.is_vanity ? ' 🌟 (Vanity)' : ' 🔗 (Regular)';
+            response += `${index + 1}. ${invite.invite_code} - ${invite.uses} uses${typeBadge}\n`;
             if (invite.inviter_name) {
               response += ` (by ${invite.inviter_name})`;
             }
             response += '\n';
+          });
+        }
+
+        // Get vanity-only invites stats
+        const vanityInvites = db.prepare(`
+          SELECT it.invite_code, it.uses, u.username as inviter_name
+          FROM invite_tracking it
+          LEFT JOIN users u ON it.inviter_id = u.id
+          WHERE it.guild_id = ? AND it.is_vanity = 1
+          ORDER BY it.uses DESC
+          LIMIT 3
+        `).all(gid);
+
+        if (vanityInvites.length > 0) {
+          response += `\nTop Vanity URLs:\n`;
+          vanityInvites.forEach((invite: any, index: number) => {
+            response += `${index + 1}. ${invite.invite_code} - ${invite.uses} uses 🌟\n`;
+            if (invite.inviter_name) {
+              response += ` (by ${invite.inviter_name})\n`;
+            }
           });
         }
 
@@ -1405,7 +1475,7 @@ client.on('interactionCreate', async interaction => {
           WHERE si.guild_id = ? AND si.is_active = 1
           ORDER BY si.detected_at DESC
           LIMIT 5
-        `).all(guildId);
+        `).all(gid);
 
         if (recentSuspicious.length > 0) {
           response += `\nRecent Suspicious Invites:\n`;
@@ -1423,15 +1493,82 @@ client.on('interactionCreate', async interaction => {
           ephemeral: true
         });
       } else if (inviteSubcommand === 'reset') {
-        const guildId = interaction.guildId;
+        const gid = interaction.guildId;
 
         // Clear suspicious flags (but keep tracking data)
-        db.prepare('UPDATE suspicious_invites SET is_active = 0 WHERE guild_id = ?').run(guildId);
+        db.prepare('UPDATE suspicious_invites SET is_active = 0 WHERE guild_id = ?').run(gid);
 
         await interaction.reply({
           content: 'Invite tracking data reset. All suspicious flags cleared.',
           ephemeral: true
         });
+      } else if (inviteSubcommand === 'vanity') {
+        const vanitySubcommand = interaction.options.getSubcommand();
+
+        if (vanitySubcommand === 'add') {
+          const inviteCode = interaction.options.getString('code', true);
+          const gid = interaction.guildId;
+
+          // Check if the invite exists
+          const existing = db.prepare('SELECT * FROM invite_tracking WHERE guild_id = ? AND invite_code = ?').get(gid, inviteCode);
+
+          if (!existing) {
+            await interaction.reply({ content: `Invite code "${inviteCode}" not found in tracking.`, ephemeral: true });
+            return;
+          }
+
+          // Mark as vanity URL
+          db.prepare('UPDATE invite_tracking SET is_vanity = 1 WHERE guild_id = ? AND invite_code = ?').run(gid, inviteCode);
+
+          await interaction.reply({
+            content: `Invite code "${inviteCode}" marked as a vanity URL.`,
+            ephemeral: true
+          });
+        } else if (vanitySubcommand === 'remove') {
+          const inviteCode = interaction.options.getString('code', true);
+          const gid = interaction.guildId;
+
+          // Remove vanity marking
+          db.prepare('UPDATE invite_tracking SET is_vanity = 0 WHERE guild_id = ? AND invite_code = ?').run(gid, inviteCode);
+
+          await interaction.reply({
+            content: `Invite code "${inviteCode}" removed from vanity URL list.`,
+            ephemeral: true
+          });
+        } else if (vanitySubcommand === 'list') {
+          const gid = interaction.guildId;
+
+          // Get all vanity URLs
+          const vanityInvites = db.prepare(`
+            SELECT it.invite_code, it.uses, u.username as inviter_name, it.created_at
+            FROM invite_tracking it
+            LEFT JOIN users u ON it.inviter_id = u.id
+            WHERE it.guild_id = ? AND it.is_vanity = 1
+            ORDER BY it.uses DESC
+          `).all(gid);
+
+          if (vanityInvites.length === 0) {
+            await interaction.reply({
+              content: 'No vanity URLs currently tracked.',
+              ephemeral: true
+            });
+            return;
+          }
+
+          let response = 'Vanity URLs:\n';
+          vanityInvites.forEach((invite: any, index: number) => {
+            response += `${index + 1}. ${invite.invite_code} - ${invite.uses} uses 🌟\n`;
+            if (invite.inviter_name) {
+              response += ` (by ${invite.inviter_name})`;
+            }
+            response += ` (Created: ${new Date(invite.created_at).toLocaleDateString()})\n`;
+          });
+
+          await interaction.reply({
+            content: response,
+            ephemeral: true
+          });
+        }
       }
     }
   }
