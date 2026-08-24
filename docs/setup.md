@@ -89,6 +89,14 @@ long-running or scheduled work never executes inside an HTTP request.
    ```
    With `DISCORD_BOT_TOKEN` unset it logs a dry-run notice and exits cleanly rather than
    connecting — safe to leave out of local development until a real bot is configured.
-6. Run the test suite: `uv run pytest`. It truncates the configured dev database and
-   flushes the configured Redis database before every test, so never point `DATABASE_URL`
-   or `REDIS_URL` at a database holding data you need.
+6. Run the test suite: `uv run pytest`. `api/tests/conftest.py` automatically points the
+   suite at a separate `pika_test` database (same Postgres server, different database
+   name) and Redis db 15, truncating/flushing only those — it never touches the dev
+   database or Redis db the app itself uses, however `DATABASE_URL`/`REDIS_URL` are set.
+   Create and migrate that database once before running tests for the first time:
+   ```bash
+   PGPASSWORD=pika_dev_local psql -h 127.0.0.1 -p 5433 -U pika -d pika -c "CREATE DATABASE pika_test OWNER pika;"
+   DATABASE_URL="postgresql+asyncpg://pika:pika_dev_local@127.0.0.1:5433/pika_test" uv run alembic upgrade head
+   ```
+   (adjust host/port/user/password to match your own Postgres if you didn't use the
+   container command in step 1).
