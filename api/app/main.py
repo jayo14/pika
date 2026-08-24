@@ -4,6 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.routers.auth import router as auth_router
 from app.routers.discord import router as discord_router
+from app.routers.monitors import router as monitors_router
+from app.routers.saved_items import router as saved_items_router
+from app.routers.signals import router as signals_router
 from app.routers.system import router as system_router
 from app.routers.workspaces import router as workspaces_router
 
@@ -23,6 +26,9 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=settings.pika_api_prefix)
     app.include_router(workspaces_router, prefix=settings.pika_api_prefix)
     app.include_router(discord_router, prefix=settings.pika_api_prefix)
+    app.include_router(monitors_router, prefix=settings.pika_api_prefix)
+    app.include_router(signals_router, prefix=settings.pika_api_prefix)
+    app.include_router(saved_items_router, prefix=settings.pika_api_prefix)
     return app
 
 
