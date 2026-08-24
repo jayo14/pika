@@ -15,7 +15,12 @@ import Dashboard from "@/pages/Dashboard";
 import MonitorsPage from "@/pages/Monitors";
 import SavedPage from "@/pages/Saved";
 import SettingsPage from "@/pages/Settings";
-import AdminConsolePage from "@/pages/AdminConsole";
+import AdminOverviewPage from "@/pages/admin/Overview";
+import AdminUsersPage from "@/pages/admin/Users";
+import AdminUserDetailPage from "@/pages/admin/UserDetail";
+import AdminWorkspacesPage from "@/pages/admin/Workspaces";
+import AdminWorkspaceDetailPage from "@/pages/admin/WorkspaceDetail";
+import AdminSystemPage from "@/pages/admin/System";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -24,6 +29,8 @@ const queryClient = new QueryClient({
 function FeatureRoute() { const [, params] = useRoute("/feature/:slug"); return <FeatureDetail slug={params?.slug ?? "product"} />; }
 function ArticleRoute() { const [, params] = useRoute("/articles/:slug"); return <ArticleDetail slug={params?.slug ?? "11-best-alternatives-to-power-up-your-workflow-in-2026"} />; }
 function CategoryRoute() { const [, params] = useRoute("/category/:slug"); return <BlogPage category={params?.slug} />; }
+function AdminUserDetailRoute() { const [, params] = useRoute("/admin/users/:id"); return params?.id ? <AdminUserDetailPage userId={params.id} /> : null; }
+function AdminWorkspaceDetailRoute() { const [, params] = useRoute("/admin/workspaces/:id"); return params?.id ? <AdminWorkspaceDetailPage workspaceId={params.id} /> : null; }
 function ScrollTop() {
   const [location] = useLocation();
 
@@ -80,7 +87,12 @@ function Router() { return <><ScrollTop /><Switch>
   <Route path="/monitors"><RequireAuth><MonitorsPage /></RequireAuth></Route>
   <Route path="/saved"><RequireAuth><SavedPage /></RequireAuth></Route>
   <Route path="/settings"><RequireAuth><SettingsPage /></RequireAuth></Route>
-  <Route path="/admin"><RequireStaff><AdminConsolePage /></RequireStaff></Route>
+  <Route path="/admin"><RequireStaff><AdminOverviewPage /></RequireStaff></Route>
+  <Route path="/admin/users"><RequireStaff><AdminUsersPage /></RequireStaff></Route>
+  <Route path="/admin/users/:id"><RequireStaff><AdminUserDetailRoute /></RequireStaff></Route>
+  <Route path="/admin/workspaces"><RequireStaff><AdminWorkspacesPage /></RequireStaff></Route>
+  <Route path="/admin/workspaces/:id"><RequireStaff><AdminWorkspaceDetailRoute /></RequireStaff></Route>
+  <Route path="/admin/system"><RequireStaff><AdminSystemPage /></RequireStaff></Route>
   <Route path="/privacy-policy"><Wrapped><LegalPage title="Privacy Policy" /></Wrapped></Route>
   <Route path="/terms-conditions"><Wrapped><LegalPage title="Terms & Conditions" /></Wrapped></Route>
   <Route path="/admin-pages/style-guide"><Wrapped><AdminPage type="style" /></Wrapped></Route>
