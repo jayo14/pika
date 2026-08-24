@@ -48,7 +48,8 @@ const del = <T,>(path: string) => request<T>(path, { method: "DELETE" });
 
 export type User = { id: string; email: string; display_name: string | null; status: string; is_staff: boolean; created_at: string };
 export type Workspace = { id: string; name: string; owner_user_id: string; retention_days: number; created_at: string };
-export type SessionResponse = { user: User; workspaces: Workspace[] };
+export type WorkspaceMembership = Workspace & { role: "owner" | "member" };
+export type SessionResponse = { user: User; workspaces: WorkspaceMembership[] };
 
 export type DiscordConnection = {
   id: string;

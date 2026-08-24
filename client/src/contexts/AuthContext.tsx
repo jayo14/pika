@@ -1,12 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, api, type SessionResponse, type User, type Workspace } from "@/lib/api";
+import { ApiError, api, type SessionResponse, type User, type WorkspaceMembership } from "@/lib/api";
 
 const ACTIVE_WORKSPACE_KEY = "pika-active-workspace-id";
 
 type AuthContextValue = {
   user: User | null;
-  workspaces: Workspace[];
+  workspaces: WorkspaceMembership[];
+  isWorkspaceOwner: boolean;
   activeWorkspaceId: string | null;
   setActiveWorkspaceId: (id: string) => void;
   isLoading: boolean;
@@ -77,6 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value: AuthContextValue = {
     user: session?.user ?? null,
     workspaces,
+    isWorkspaceOwner: workspaces.find((w) => w.id === activeWorkspaceId)?.role === "owner",
     activeWorkspaceId,
     setActiveWorkspaceId,
     isLoading: meQuery.isLoading,

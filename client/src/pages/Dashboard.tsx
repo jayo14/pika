@@ -71,8 +71,15 @@ export default function Dashboard() {
     return map;
   }, [monitorsQuery.data]);
 
-  const newSignals = (signalsQuery.data ?? []).filter((s) => s.status === "new");
+  const allSignals = signalsQuery.data ?? [];
+  const newSignals = allSignals.filter((s) => s.status === "new");
   const savedItems = savedQuery.data ?? [];
+  const statusCounts = {
+    new: allSignals.filter((s) => s.status === "new").length,
+    saved: allSignals.filter((s) => s.status === "saved").length,
+    archived: allSignals.filter((s) => s.status === "archived").length,
+  };
+  const maxStatusCount = Math.max(1, statusCounts.new, statusCounts.saved, statusCounts.archived);
   const unreadNotifications = notificationsQuery.data ?? [];
   const searchResults = searchMutation.data?.results ?? [];
 
@@ -127,8 +134,15 @@ export default function Dashboard() {
             <div className="pika-pulse-left">
               <h3>{newSignals.length ? "New signals waiting for review" : "No new signals yet"}</h3>
               <p>Connect a server and create a monitor to start surfacing opportunities automatically.</p>
-              <div className="pika-pulse-chart" aria-label="Illustrative conversation activity">
-                <span className="chart-bar bar-one" /><span className="chart-bar bar-two" /><span className="chart-bar bar-three" /><span className="chart-bar bar-four" /><span className="chart-bar bar-five" /><span className="chart-line" />
+              <div className="pika-pulse-chart" aria-label={`Signal breakdown: ${statusCounts.new} new, ${statusCounts.saved} saved, ${statusCounts.archived} archived`}>
+                <span className="chart-bar" style={{ height: `${Math.max(8, (statusCounts.new / maxStatusCount) * 100)}%` }} />
+                <span className="chart-bar" style={{ height: `${Math.max(8, (statusCounts.saved / maxStatusCount) * 100)}%` }} />
+                <span className="chart-bar" style={{ height: `${Math.max(8, (statusCounts.archived / maxStatusCount) * 100)}%` }} />
+              </div>
+              <div className="pika-chart-legend">
+                <span><i className="legend-coral" />New ({statusCounts.new})</span>
+                <span><i className="legend-violet" />Saved ({statusCounts.saved})</span>
+                <span><i className="legend-orange" />Archived ({statusCounts.archived})</span>
               </div>
             </div>
             <div className="pika-thread-rank">

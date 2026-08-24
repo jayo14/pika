@@ -59,7 +59,7 @@ export default function SettingsPage() {
 }
 
 function IntegrationsTab() {
-  const { activeWorkspaceId } = useAuth();
+  const { activeWorkspaceId, isWorkspaceOwner } = useAuth();
   const workspaceId = activeWorkspaceId ?? "";
   const queryClient = useQueryClient();
   const [editingChannels, setEditingChannels] = useState<string | null>(null);
@@ -82,8 +82,9 @@ function IntegrationsTab() {
     <section className="pika-conversations-table pika-page-block">
       <div className="pika-table-head">
         <div><span>Connected Discord servers</span><p>Pika only processes activity from servers an administrator explicitly authorized here.</p></div>
-        <button onClick={() => connectMutation.mutate()} disabled={connectMutation.isPending}>{connectMutation.isPending ? "Redirecting…" : "Connect a server"}</button>
+        {isWorkspaceOwner && <button onClick={() => connectMutation.mutate()} disabled={connectMutation.isPending}>{connectMutation.isPending ? "Redirecting…" : "Connect a server"}</button>}
       </div>
+      {!isWorkspaceOwner && <p className="pika-form-hint pika-form-error-inline">Only the workspace owner can connect or revoke servers and edit channel scope.</p>}
       {connectMutation.error && <p className="pika-form-error pika-form-error-inline">{connectMutation.error instanceof ApiError ? connectMutation.error.detail : "Could not start Discord connection."}</p>}
       {!connections.length ? (
         <div className="pika-table-empty"><Plug size={20} /><b>No servers connected yet.</b><span>Connect a Discord server you administer to start monitoring it.</span></div>
@@ -93,13 +94,13 @@ function IntegrationsTab() {
             <article key={connection.id}>
               <div className="table-conversation"><span className="pika-result-mark violet"><Plug size={14} /></span><span><b>{connection.discord_guild_name ?? connection.discord_guild_id}</b><small>Guild {connection.discord_guild_id}</small></span></div>
               <span className={`table-relevance relevance-${connection.status === "active" ? "high" : "worth-a-look"}`}>{connection.status}</span>
-              <button className="pika-icon-button" onClick={() => setEditingChannels(editingChannels === connection.id ? null : connection.id)}>Channels</button>
-              <button className="pika-icon-button" aria-label="Revoke connection" onClick={() => revokeMutation.mutate(connection.id)} disabled={connection.status !== "active"}><Trash2 size={15} /></button>
+              <button className="pika-icon-button" onClick={() => setEditingChannels(editingChannels === connection.id ? null : connection.id)} disabled={!isWorkspaceOwner}>Channels</button>
+              <button className="pika-icon-button" aria-label="Revoke connection" onClick={() => revokeMutation.mutate(connection.id)} disabled={!isWorkspaceOwner || connection.status !== "active"}><Trash2 size={15} /></button>
             </article>
           ))}
         </div>
       )}
-      {editingChannels && <ChannelAllowlistEditor connectionId={editingChannels} />}
+      {editingChannels && isWorkspaceOwner && <ChannelAllowlistEditor connectionId={editingChannels} />}
     </section>
   );
 }
@@ -184,7 +185,7 @@ function NotificationsTab() {
 }
 
 function BillingTab() {
-  const { activeWorkspaceId } = useAuth();
+  const { activeWorkspaceId, isWorkspaceOwner } = useAuth();
   const workspaceId = activeWorkspaceId ?? "";
   const queryClient = useQueryClient();
 
@@ -206,6 +207,7 @@ function BillingTab() {
   return (
     <section className="pika-conversations-table pika-page-block">
       <div className="pika-table-head"><div><span>Billing</span><p>Plan limits are enforced by the API — this is not a UI-only display.</p></div></div>
+      {!isWorkspaceOwner && <p className="pika-form-hint pika-form-error-inline">Only the workspace owner can change the plan.</p>}
       {usage && (
         <div className="pika-usage-row">
           <div><small>Plan</small><b>{usage.plan}</b></div>
@@ -220,7 +222,7 @@ function BillingTab() {
             <span className="pika-plan-name">{plan.label}</span>
             <span className="pika-plan-price">{plan.price}</span>
             <p>{plan.blurb}</p>
-            <button disabled={usage?.plan === plan.id || changePlanMutation.isPending} onClick={() => changePlanMutation.mutate(plan.id)}>
+            <button disabled={!isWorkspaceOwner || usage?.plan === plan.id || changePlanMutation.isPending} onClick={() => changePlanMutation.mutate(plan.id)}>
               {usage?.plan === plan.id ? "Current plan" : `Switch to ${plan.label}`}
             </button>
           </div>
@@ -245,6 +247,7 @@ function AccountTab() {
         <div><small>Email</small><b>{user?.email}</b></div>
         <div><small>Display name</small><b>{user?.display_name ?? "—"}</b></div>
         <div><small>Active workspace</small><b>{workspace?.name ?? "—"}</b></div>
+        <div><small>Your role</small><b>{workspace?.role ?? "—"}</b></div>
         <div><small>Data retention</small><b>{workspace?.retention_days ?? "—"} days</b></div>
       </div>
     </section>
