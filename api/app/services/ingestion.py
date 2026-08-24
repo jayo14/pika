@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import encrypt_secret
@@ -41,6 +41,11 @@ async def ingest_event(
     workspace = await db.get(Workspace, connection.workspace_id)
     retention_days = workspace.retention_days if workspace else 30
 
+    # The search index is derived from the decrypted content at write time and stored
+    # alongside the ciphertext, never in place of it — deleting the Event row (retention
+    # expiry, revocation, or a deletion request) removes both together.
+    searchable_text = str(payload.get("content", ""))
+
     event = Event(
         connection_id=connection_id,
         source_event_id=source_event_id,
@@ -48,6 +53,7 @@ async def ingest_event(
         occurred_at=occurred_at,
         expires_at=occurred_at + timedelta(days=retention_days),
         payload_ciphertext=encrypt_secret(json.dumps(payload)),
+        search_vector=func.to_tsvector("english", searchable_text),
     )
     db.add(event)
     await db.commit()

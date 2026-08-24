@@ -159,6 +159,128 @@ class SavedItemUpdate(BaseModel):
     note: str | None = Field(default=None, max_length=4000)
 
 
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    workspace_id: UUID
+    signal_id: UUID
+    priority: str
+    delivered_at: datetime | None
+    read_at: datetime | None
+    created_at: datetime
+
+
+class NotificationPreferenceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    workspace_id: UUID
+    min_priority: Literal["low", "normal", "high", "critical"]
+    in_app_enabled: bool
+
+
+class NotificationPreferenceUpdate(BaseModel):
+    min_priority: Literal["low", "normal", "high", "critical"] = "low"
+    in_app_enabled: bool = True
+
+
+class SearchRequest(BaseModel):
+    workspace_id: UUID
+    query: str = Field(min_length=1, max_length=500)
+    save: bool = False
+
+
+class SearchResultItem(BaseModel):
+    event_id: UUID
+    connection_id: UUID
+    event_type: str
+    occurred_at: datetime
+    snippet: str
+    rank: float
+
+
+class SearchResponse(BaseModel):
+    id: UUID
+    query: str
+    results: list[SearchResultItem]
+
+
+class SavedSearchOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    workspace_id: UUID
+    query_text: str
+    saved: bool
+    created_at: datetime
+
+
+class SubscriptionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    workspace_id: UUID
+    plan: str
+    status: str
+    current_period_end: datetime | None
+
+
+class PlanLimits(BaseModel):
+    plan: str
+    monitors: int | None
+    connections: int | None
+    saved_searches: int | None
+    retention_days: int
+    price_usd_per_month: float
+
+
+class UsageOut(BaseModel):
+    workspace_id: UUID
+    plan: str
+    limits: PlanLimits
+    monitors_used: int
+    connections_used: int
+    saved_searches_used: int
+
+
+class PlanChangeRequest(BaseModel):
+    plan: Literal["free", "pro", "business"]
+
+
+class AdminUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: str
+    display_name: str | None
+    status: str
+    is_staff: bool
+    created_at: datetime
+
+
+class AdminWorkspaceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    owner_user_id: UUID
+    retention_days: int
+    created_at: datetime
+    plan: str
+    member_count: int
+    connection_count: int
+    monitor_count: int
+
+
+class AdminSystemHealth(BaseModel):
+    database: Literal["ok", "error"]
+    redis: Literal["ok", "error"]
+    celery_workers_online: int
+    total_users: int
+    total_workspaces: int
+    total_active_connections: int
+    events_pending_expiry_next_24h: int
+
+
 class SavedItemOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

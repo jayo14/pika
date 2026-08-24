@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import delete, select
 
+from app.core.redis import get_redis
 from app.core.security import decrypt_secret
 from app.db.models import DiscordConnection, Event, Monitor, MonitorRule, Notification, Signal
 from app.db.session import get_sessionmaker
@@ -17,6 +18,18 @@ from app.workers.celery_app import celery_app
 logger = logging.getLogger("pika.workers")
 
 HIGH_PRIORITY_NOTIFY_THRESHOLD = 70.0
+NOTIFICATION_COOLDOWN_SECONDS = 15 * 60
+
+
+async def _notification_allowed_by_cooldown(monitor_id: UUID) -> bool:
+    """A monitor matching repeatedly in a burst (e.g. an active thread) should not spawn
+    a Notification row for every single match — this is the "cooldown-aware delivery"
+    called for in docs/database.md. `SET NX` is atomic, so concurrent workers processing
+    events for the same monitor cannot both win the same cooldown window."""
+
+    redis = get_redis()
+    key = f"notify_cooldown:{monitor_id}"
+    return bool(await redis.set(key, "1", nx=True, ex=NOTIFICATION_COOLDOWN_SECONDS))
 
 
 async def _process_event_async(event_id: UUID) -> None:
@@ -68,7 +81,9 @@ async def _process_event_async(event_id: UUID) -> None:
             db.add(signal)
             await db.flush()
 
-            if evaluation.score >= HIGH_PRIORITY_NOTIFY_THRESHOLD:
+            if evaluation.score >= HIGH_PRIORITY_NOTIFY_THRESHOLD and await _notification_allowed_by_cooldown(
+                monitor.id
+            ):
                 db.add(
                     Notification(
                         workspace_id=connection.workspace_id,
