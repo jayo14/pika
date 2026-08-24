@@ -30,8 +30,25 @@ const routes = [
 ];
 
 const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${routes.map((route) => `  <url><loc>${baseUrl}${route}</loc></url>`).join("\n")}\n</urlset>\n`;
-const robots = `# Pika public crawl policy. Private workspaces and authentication routes are excluded from crawling.\nUser-agent: *\nAllow: /\nDisallow: /dashboard\nDisallow: /sign-in\nDisallow: /sign-up\nDisallow: /forgot-password\nDisallow: /admin-pages/\nDisallow: /401\nDisallow: /404\nSitemap: ${baseUrl}/sitemap.xml\n`;
-const publicDirectory = path.resolve("frontend/public");
+// Kept in sync with the noindex routes declared in client/src/App.tsx — every private
+// (workspace, auth, admin) route gets both a robots.txt Disallow (stops crawling) and a
+// per-page `noindex` meta tag (stops indexing if it's ever fetched some other way).
+const disallowedRoutes = [
+  "/dashboard",
+  "/monitors",
+  "/saved",
+  "/settings",
+  "/sign-in",
+  "/sign-up",
+  "/forgot-password",
+  "/reset-password",
+  "/admin",
+  "/admin-pages/",
+  "/401",
+  "/404",
+];
+const robots = `# Pika public crawl policy. Private workspaces, authentication, and admin routes are excluded from crawling.\nUser-agent: *\nAllow: /\n${disallowedRoutes.map((route) => `Disallow: ${route}`).join("\n")}\nSitemap: ${baseUrl}/sitemap.xml\n`;
+const publicDirectory = path.resolve("client/public");
 await mkdir(publicDirectory, { recursive: true });
 await writeFile(path.join(publicDirectory, "sitemap.xml"), xml);
 await writeFile(path.join(publicDirectory, "robots.txt"), robots);

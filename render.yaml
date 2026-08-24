@@ -110,7 +110,7 @@ services:
   - type: web
     name: pika-client
     runtime: static
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && node scripts/generate-sitemap.mjs && pnpm build
     staticPublishPath: dist/public
     envVars:
       # Split-domain deployment: the client and API are different Render origins, so the
@@ -118,6 +118,12 @@ services:
       # Set this to https://pika-api.onrender.com (or your custom API domain) once the
       # API service's URL is known.
       - key: VITE_API_BASE_URL
+        sync: false
+      # The real public domain this static site will be served from (e.g.
+      # https://pika.example.com or the pika-client.onrender.com URL) — required by
+      # scripts/generate-sitemap.mjs, which fails the build if it's unset rather than
+      # bake a wrong domain into sitemap.xml/robots.txt.
+      - key: PIKA_PUBLIC_SITE_URL
         sync: false
     routes:
       - type: rewrite

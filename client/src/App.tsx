@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { Seo } from "@/components/Seo";
 import { SiteShell } from "@/components/SiteShell";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Home from "@/pages/Home";
@@ -80,20 +81,20 @@ function Router() { return <><ScrollTop /><Switch>
   <Route path="/category/:slug"><Wrapped><CategoryRoute /></Wrapped></Route>
   <Route path="/articles/:slug"><Wrapped><ArticleRoute /></Wrapped></Route>
   <Route path="/contact"><Wrapped><ContactPage /></Wrapped></Route>
-  <Route path="/sign-in"><SignInPage /></Route>
-  <Route path="/sign-up"><SignUpPage /></Route>
-  <Route path="/forgot-password"><ForgotPasswordPage /></Route>
-  <Route path="/reset-password"><ResetPasswordPage /></Route>
-  <Route path="/dashboard"><RequireAuth><Dashboard /></RequireAuth></Route>
-  <Route path="/monitors"><RequireAuth><MonitorsPage /></RequireAuth></Route>
-  <Route path="/saved"><RequireAuth><SavedPage /></RequireAuth></Route>
-  <Route path="/settings"><RequireAuth><SettingsPage /></RequireAuth></Route>
-  <Route path="/admin"><RequireStaff><AdminOverviewPage /></RequireStaff></Route>
-  <Route path="/admin/users"><RequireStaff><AdminUsersPage /></RequireStaff></Route>
-  <Route path="/admin/users/:id"><RequireStaff><AdminUserDetailRoute /></RequireStaff></Route>
-  <Route path="/admin/workspaces"><RequireStaff><AdminWorkspacesPage /></RequireStaff></Route>
-  <Route path="/admin/workspaces/:id"><RequireStaff><AdminWorkspaceDetailRoute /></RequireStaff></Route>
-  <Route path="/admin/system"><RequireStaff><AdminSystemPage /></RequireStaff></Route>
+  <Route path="/sign-in"><Seo path="/sign-in" title="Sign in" description="Sign in to your Pika workspace." noindex /><SignInPage /></Route>
+  <Route path="/sign-up"><Seo path="/sign-up" title="Create account" description="Create your Pika account." noindex /><SignUpPage /></Route>
+  <Route path="/forgot-password"><Seo path="/forgot-password" title="Forgot password" description="Reset your Pika account password." noindex /><ForgotPasswordPage /></Route>
+  <Route path="/reset-password"><Seo path="/reset-password" title="Reset password" description="Choose a new Pika account password." noindex /><ResetPasswordPage /></Route>
+  <Route path="/dashboard"><Seo path="/dashboard" title="Dashboard" description="Your Pika workspace." noindex /><RequireAuth><Dashboard /></RequireAuth></Route>
+  <Route path="/monitors"><Seo path="/monitors" title="Monitors" description="Your Pika workspace." noindex /><RequireAuth><MonitorsPage /></RequireAuth></Route>
+  <Route path="/saved"><Seo path="/saved" title="Saved" description="Your Pika workspace." noindex /><RequireAuth><SavedPage /></RequireAuth></Route>
+  <Route path="/settings"><Seo path="/settings" title="Settings" description="Your Pika workspace." noindex /><RequireAuth><SettingsPage /></RequireAuth></Route>
+  <Route path="/admin"><Seo path="/admin" title="Admin" description="Pika admin console." noindex /><RequireStaff><AdminOverviewPage /></RequireStaff></Route>
+  <Route path="/admin/users"><Seo path="/admin/users" title="Admin · Users" description="Pika admin console." noindex /><RequireStaff><AdminUsersPage /></RequireStaff></Route>
+  <Route path="/admin/users/:id"><Seo path="/admin/users" title="Admin · User" description="Pika admin console." noindex /><RequireStaff><AdminUserDetailRoute /></RequireStaff></Route>
+  <Route path="/admin/workspaces"><Seo path="/admin/workspaces" title="Admin · Workspaces" description="Pika admin console." noindex /><RequireStaff><AdminWorkspacesPage /></RequireStaff></Route>
+  <Route path="/admin/workspaces/:id"><Seo path="/admin/workspaces" title="Admin · Workspace" description="Pika admin console." noindex /><RequireStaff><AdminWorkspaceDetailRoute /></RequireStaff></Route>
+  <Route path="/admin/system"><Seo path="/admin/system" title="Admin · System" description="Pika admin console." noindex /><RequireStaff><AdminSystemPage /></RequireStaff></Route>
   <Route path="/privacy-policy"><Wrapped><LegalPage title="Privacy Policy" /></Wrapped></Route>
   <Route path="/terms-conditions"><Wrapped><LegalPage title="Terms & Conditions" /></Wrapped></Route>
   <Route path="/admin-pages/style-guide"><Wrapped><AdminPage type="style" /></Wrapped></Route>

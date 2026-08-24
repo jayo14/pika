@@ -2,12 +2,28 @@
 import { Link } from "wouter";
 import { ArrowUpRight, ChevronRight } from "lucide-react";
 import { ArticleGrid, ButtonLink, CtaBanner, Eyebrow, FaqSection } from "@/components/Blocks";
-import { ASSETS, featureItems, useCases, workflowQuestions } from "@/data/site";
+import { Seo } from "@/components/Seo";
+import { ASSETS, featureItems, richLead, useCases, workflowQuestions } from "@/data/site";
 
 const ticker = ["Search conversations", "Find people", "Watch topics", "Save threads"];
 
 export default function Home() {
+  const origin = window.location.origin;
+  const homeJsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      { "@type": "Organization", name: "Pika", url: origin, logo: `${origin}${ASSETS.logo}` },
+      {
+        "@type": "SoftwareApplication",
+        name: "Pika",
+        applicationCategory: "BusinessApplication",
+        operatingSystem: "Web",
+        description: richLead,
+      },
+    ],
+  };
   return <>
+    <Seo path="/" title="Pika — Discord intelligence workspace" description={richLead} jsonLd={homeJsonLd} />
     <section className="home-hero site-container"><div className="hero-backdrop"><img src={ASSETS.grid} alt="" /></div><div className="hero-copy" data-reveal="scale"><Eyebrow>Find better conversations</Eyebrow><h1>Find the conversations, people, and opportunities worth your attention.</h1><p>Search communities, follow topics, and save useful threads in one place.</p><div className="hero-actions"><ButtonLink href="/pricing">Get started</ButtonLink><span>or</span><ButtonLink href="/features" tone="secondary">See the product</ButtonLink></div></div><div className="hero-dashboard"><img src={ASSETS.communitySearch} alt="Pika search results for people looking for a React developer" /></div></section>
     <div className="site-container ticker">{ticker.map((item, index) => <span key={item}><i className={index % 2 ? "dark-dot" : "gradient-dot"} />{item}</span>)}</div>
     <section className="section main-features"><div className="site-container"><div className="feature-heading" data-reveal="scale"><Eyebrow>Search without digging</Eyebrow><div><h2>Ask for the thing you want to find.</h2><p>Find people looking for a developer. Find conversations about a problem. Find communities about a topic.</p></div></div><div className="step-visual" data-reveal data-reveal-delay="1"><div className="feature-steps"><article><div className="workflow-art"><img src={ASSETS.workflowQuestion} alt="Abstract 3D shape representing a search question" /></div><span>01</span><h3>Type a simple question</h3><p>Start with the person, topic, or problem you care about.</p></article><article><div className="workflow-art"><img src={ASSETS.workflowResults} alt="Abstract 3D shapes representing search results" /></div><span>02</span><h3>Read the results</h3><p>See useful conversations without opening server after server.</p></article><article><div className="workflow-art"><img src={ASSETS.workflowSave} alt="Abstract 3D bookmark shape representing saved results" /></div><span>03</span><h3>Save the good ones</h3><p>Keep a short list of people and threads to revisit.</p></article></div></div></div></section>
