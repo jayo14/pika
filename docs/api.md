@@ -2,7 +2,12 @@
 
 Every route below is implemented in `api/app/routers/` — this document is generated from
 reading that code, not a forward-looking design (compare `git log` if anything drifts).
-Interactive Swagger UI is also available at `GET /docs` on a running instance.
+Interactive, auto-generated docs are also available on a running instance: `GET /docs`
+(Swagger UI), `GET /redoc` (ReDoc), `GET /scalar` (Scalar — the richest of the three),
+and the raw schema at `GET /openapi.json`. All four are generated from the same FastAPI
+route/Pydantic definitions this document was written by reading — there is no separate
+schema to keep in sync (this project is FastAPI, not Django/DRF, so drf-spectacular
+doesn't apply here; `scalar-fastapi` is FastAPI's equivalent).
 
 **Base URL**: `/api/v1` (`PIKA_API_PREFIX`). All paths below are relative to it.
 
