@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, BookOpen, Bookmark, ChevronDown, CircleHelp, LayoutDashboard, Menu, MoreHorizontal, Radar, Settings, ShieldCheck, X } from "lucide-react";
+import { Bell, Bookmark, ChevronDown, CircleHelp, Home, Menu, MoreHorizontal, Radar, Settings, ShieldCheck, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 
@@ -9,8 +9,8 @@ function Brand() { return <Link className="pika-dash-brand" href="/"><span class
 
 export type AppNavKey = "dashboard" | "monitors" | "saved" | "settings" | "admin";
 
-const NAV_ITEMS: { id: AppNavKey; label: string; icon: typeof LayoutDashboard; href: string }[] = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
+const NAV_ITEMS: { id: AppNavKey; label: string; icon: typeof Home; href: string }[] = [
+  { id: "dashboard", label: "Dashboard", icon: Home, href: "/dashboard" },
   { id: "monitors", label: "Monitors", icon: Radar, href: "/monitors" },
   { id: "saved", label: "Saved", icon: Bookmark, href: "/saved" },
 ];
@@ -71,14 +71,13 @@ export function AppShell({ active, title, headerRight, children }: { active: App
                 const Icon = item.icon;
                 return <Link key={item.id} href={item.href} className={active === item.id ? "is-active" : ""}><Icon size={17} /><span>{item.label}</span></Link>;
               })}
-              <Link href="/blog-articles"><BookOpen size={17} /><span>Guides</span></Link>
             </nav>
             <span className="pika-dash-side-label side-label-lower">Workspace tools</span>
             {user?.is_staff && <Link href="/admin" className={`pika-dash-side-tool ${active === "admin" ? "is-active" : ""}`}><ShieldCheck size={17} />Admin</Link>}
             <a className="pika-dash-side-tool" href="mailto:support@pika.app"><CircleHelp size={17} />Help & support</a>
           </div>
           <div className="pika-dash-profile">
-            <Link href="/settings"><Settings size={17} />Settings</Link>
+            <Link href="/settings"><Settings size={17} /><span>Settings</span></Link>
             <button type="button" onClick={handleSignOut}>
               <span className="pika-dash-initial initial-a">{initial}</span>
               <span><b>{user?.display_name || user?.email}</b><small>Sign out</small></span>
