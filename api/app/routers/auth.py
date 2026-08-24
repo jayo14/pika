@@ -12,6 +12,7 @@ from app.core.sessions import (
     SESSION_COOKIE_NAME,
     clear_session_cookie,
     create_session,
+    destroy_all_sessions,
     destroy_session,
     set_session_cookie,
 )
@@ -138,13 +139,20 @@ async def update_profile(
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     payload: ChangePasswordRequest,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> None:
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect.")
     current_user.password_hash = hash_password(payload.new_password)
     await db.commit()
+
+    # A changed password should not leave any session — including this one — valid on an
+    # old credential. The client is expected to treat this as a forced sign-out.
+    await destroy_all_sessions(current_user.id)
+    clear_session_cookie(response, settings)
 
 
 _RESET_REQUESTED_MESSAGE = "If an account exists for that email, a password reset link has been sent."
@@ -187,3 +195,4 @@ async def confirm_password_reset(payload: PasswordResetConfirm, db: AsyncSession
 
     user.password_hash = hash_password(payload.new_password)
     await db.commit()
+    await destroy_all_sessions(user.id)

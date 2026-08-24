@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, CreditCard, Plug, Trash2, User as UserIcon } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
@@ -240,16 +241,99 @@ function BillingTab() {
 function AccountTab() {
   const { user, workspaces, activeWorkspaceId } = useAuth();
   const workspace = workspaces.find((w) => w.id === activeWorkspaceId);
+
+  return (
+    <>
+      <section className="pika-conversations-table pika-page-block">
+        <div className="pika-table-head"><div><span>Account</span><p>Your Pika identity and active workspace.</p></div></div>
+        <div className="pika-account-details">
+          <div><small>Email</small><b>{user?.email}</b></div>
+          <div><small>Active workspace</small><b>{workspace?.name ?? "—"}</b></div>
+          <div><small>Your role</small><b>{workspace?.role ?? "—"}</b></div>
+          <div><small>Data retention</small><b>{workspace?.retention_days ?? "—"} days</b></div>
+        </div>
+      </section>
+      <ProfileForm />
+      <ChangePasswordForm />
+    </>
+  );
+}
+
+function ProfileForm() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [displayName, setDisplayName] = useState(user?.display_name ?? "");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(user?.display_name ?? "");
+  }, [user?.display_name]);
+
+  const mutation = useMutation({
+    mutationFn: () => api.auth.updateProfile({ display_name: displayName || undefined }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["me"], data);
+      setSaved(true);
+    },
+  });
+
   return (
     <section className="pika-conversations-table pika-page-block">
-      <div className="pika-table-head"><div><span>Account</span><p>Your Pika identity and active workspace.</p></div></div>
-      <div className="pika-account-details">
-        <div><small>Email</small><b>{user?.email}</b></div>
-        <div><small>Display name</small><b>{user?.display_name ?? "—"}</b></div>
-        <div><small>Active workspace</small><b>{workspace?.name ?? "—"}</b></div>
-        <div><small>Your role</small><b>{workspace?.role ?? "—"}</b></div>
-        <div><small>Data retention</small><b>{workspace?.retention_days ?? "—"} days</b></div>
-      </div>
+      <div className="pika-table-head"><div><span>Profile</span><p>Shown in the sidebar and topbar.</p></div></div>
+      <form
+        className="pika-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setSaved(false);
+          mutation.mutate();
+        }}
+      >
+        <div className="pika-form-row">
+          <label>Display name<input value={displayName} onChange={(e) => { setDisplayName(e.target.value); setSaved(false); }} placeholder="Your name" maxLength={120} /></label>
+        </div>
+        {mutation.error && <p className="pika-form-error">{mutation.error instanceof ApiError ? mutation.error.detail : "Could not update profile."}</p>}
+        {saved && !mutation.error && <p className="pika-form-hint">Saved.</p>}
+        <button className="pika-form-submit" type="submit" disabled={mutation.isPending}>{mutation.isPending ? "Saving…" : "Save profile"}</button>
+      </form>
+    </section>
+  );
+}
+
+function ChangePasswordForm() {
+  const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: () => api.auth.changePassword({ current_password: currentPassword, new_password: newPassword }),
+    onSuccess: () => {
+      // Changing the password revokes every session, including this one (see
+      // api/app/routers/auth.py change_password) — the cookie is already cleared
+      // server-side, so this just resets local state and sends the user to sign in.
+      queryClient.setQueryData(["me"], null);
+      queryClient.clear();
+      setLocation("/sign-in");
+    },
+  });
+
+  return (
+    <section className="pika-conversations-table pika-page-block">
+      <div className="pika-table-head"><div><span>Change password</span><p>You'll be signed out everywhere and need to sign in again with the new password.</p></div></div>
+      <form
+        className="pika-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          mutation.mutate();
+        }}
+      >
+        <div className="pika-form-row">
+          <label>Current password<input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required autoComplete="current-password" /></label>
+          <label>New password<input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength={10} autoComplete="new-password" /></label>
+        </div>
+        {mutation.error && <p className="pika-form-error">{mutation.error instanceof ApiError ? mutation.error.detail : "Could not change password."}</p>}
+        <button className="pika-form-submit" type="submit" disabled={mutation.isPending}>{mutation.isPending ? "Updating…" : "Change password"}</button>
+      </form>
     </section>
   );
 }

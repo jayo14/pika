@@ -113,3 +113,34 @@ async def test_change_password_succeeds_and_old_password_stops_working(client):
 
     new = await client.post("/api/v1/auth/signin", json={"email": "change-pw-2@example.com", "password": "brandnewpassword1"})
     assert new.status_code == 200
+
+
+async def test_change_password_revokes_sessions_on_other_devices():
+    """A password change must kill every active session for the user, not just the one
+    that made the request — otherwise a session on a stolen device would survive the
+    exact rotation meant to revoke it."""
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as device_a, AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as device_b:
+        await device_a.post(
+            "/api/v1/auth/signup", json={"email": "multi-device@example.com", "password": "correcthorsebattery"}
+        )
+        await device_b.post(
+            "/api/v1/auth/signin", json={"email": "multi-device@example.com", "password": "correcthorsebattery"}
+        )
+
+        assert (await device_b.get("/api/v1/auth/me")).status_code == 200
+
+        changed = await device_a.post(
+            "/api/v1/auth/change-password",
+            json={"current_password": "correcthorsebattery", "new_password": "brandnewpassword1"},
+        )
+        assert changed.status_code == 204
+
+        assert (await device_b.get("/api/v1/auth/me")).status_code == 401
+        assert (await device_a.get("/api/v1/auth/me")).status_code == 401
