@@ -104,6 +104,7 @@ class ConnectionChannelOut(BaseModel):
 
 
 class MonitorCreate(BaseModel):
+    workspace_id: UUID
     connection_id: UUID
     name: str = Field(min_length=1, max_length=160)
     monitor_type: str = Field(min_length=1, max_length=32)

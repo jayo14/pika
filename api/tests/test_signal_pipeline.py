@@ -57,7 +57,7 @@ async def _seed_monitor(db, *, keyword: str) -> tuple:
 async def test_matching_event_produces_explainable_signal():
     session_factory = get_sessionmaker()
     async with session_factory() as db:
-        workspace, connection, monitor = await _seed_monitor(db, keyword="react developer")
+        workspace, connection, _monitor = await _seed_monitor(db, keyword="react developer")
 
     async with session_factory() as db:
         event = await ingest_event(
