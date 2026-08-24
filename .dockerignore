@@ -1,0 +1,13 @@
+.git
+node_modules
+dist
+.nuxt
+.manus-logs
+attached_assets
+api/.venv
+api/__pycache__
+api/**/__pycache__
+.env
+.env.*
+!.env.example
+*.md
