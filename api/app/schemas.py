@@ -273,6 +273,52 @@ class AdminWorkspaceOut(BaseModel):
     monitor_count: int
 
 
+class AdminUserListOut(BaseModel):
+    items: list[AdminUserOut]
+    total: int
+
+
+class AdminWorkspaceListOut(BaseModel):
+    items: list[AdminWorkspaceOut]
+    total: int
+
+
+class AdminUserWorkspaceMembership(BaseModel):
+    workspace_id: UUID
+    workspace_name: str
+    role: str
+
+
+class AdminUserDetail(AdminUserOut):
+    workspaces: list[AdminUserWorkspaceMembership]
+
+
+class AdminWorkspaceMember(BaseModel):
+    user_id: UUID
+    email: str
+    role: str
+
+
+class AdminWorkspaceConnection(BaseModel):
+    id: UUID
+    discord_guild_id: str
+    discord_guild_name: str | None
+    status: str
+
+
+class AdminWorkspaceMonitor(BaseModel):
+    id: UUID
+    name: str
+    monitor_type: str
+    enabled: bool
+
+
+class AdminWorkspaceDetail(AdminWorkspaceOut):
+    members: list[AdminWorkspaceMember]
+    connections: list[AdminWorkspaceConnection]
+    monitors: list[AdminWorkspaceMonitor]
+
+
 class AdminSystemHealth(BaseModel):
     database: Literal["ok", "error"]
     redis: Literal["ok", "error"]
