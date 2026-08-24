@@ -22,8 +22,14 @@ class Settings(BaseSettings):
     discord_redirect_uri: str | None = None
     discord_bot_token: str | None = None
     encryption_key: str | None = None
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
     product_name: str = "Pika API"
     version: str = "0.1.0"
+
+    @property
+    def billing_provider_ready(self) -> bool:
+        return bool(self.stripe_secret_key)
 
     @property
     def cors_origins(self) -> list[str]:

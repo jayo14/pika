@@ -45,6 +45,7 @@ class UserOut(BaseModel):
     email: str
     display_name: str | None
     status: str
+    is_staff: bool
     created_at: datetime
 
 

@@ -2,7 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
+from app.routers.billing import router as billing_router
 from app.routers.discord import router as discord_router
 from app.routers.monitors import router as monitors_router
 from app.routers.notifications import router as notifications_router
@@ -33,6 +35,8 @@ def create_app() -> FastAPI:
     app.include_router(saved_items_router, prefix=settings.pika_api_prefix)
     app.include_router(notifications_router, prefix=settings.pika_api_prefix)
     app.include_router(search_router, prefix=settings.pika_api_prefix)
+    app.include_router(billing_router, prefix=settings.pika_api_prefix)
+    app.include_router(admin_router, prefix=settings.pika_api_prefix)
     return app
 
 

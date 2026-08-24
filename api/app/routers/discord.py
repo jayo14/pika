@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.billing_plans import get_plan_limits, within_limit
 from app.core.config import Settings, get_settings
 from app.core.deps import NOT_FOUND, ensure_workspace_membership, get_current_user
 from app.core.oauth_state import consume_state, create_state
@@ -21,6 +22,7 @@ from app.schemas import (
     OAuthStartRequest,
     OAuthStartResponse,
 )
+from app.services.billing_service import count_active_connections, get_workspace_plan
 from app.services.discord_oauth import DiscordOAuthError, build_authorize_url, exchange_code
 
 router = APIRouter(tags=["discord"])
@@ -41,6 +43,15 @@ async def start_oauth(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Discord integration is not configured on this server yet.",
+        )
+
+    plan = await get_workspace_plan(db, payload.workspace_id)
+    limits = get_plan_limits(plan)
+    used = await count_active_connections(db, payload.workspace_id)
+    if not within_limit(used, limits.connections):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"The {plan} plan allows up to {limits.connections} connected server(s). Upgrade to connect more.",
         )
 
     state = await create_state(current_user.id, payload.workspace_id)

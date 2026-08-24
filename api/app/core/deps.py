@@ -50,6 +50,15 @@ async def ensure_workspace_membership(db: AsyncSession, user_id: UUID, workspace
         raise NOT_FOUND
 
 
+async def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Gates the admin API. Never exposed to a normal user — is_staff is set directly in
+    the database by an operator, there is no self-service way for a user to grant it."""
+
+    if not current_user.is_staff:
+        raise NOT_FOUND
+    return current_user
+
+
 async def require_workspace_member(
     workspace_id: UUID,
     current_user: User = Depends(get_current_user),
