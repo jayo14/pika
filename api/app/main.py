@@ -2,7 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.routers.auth import router as auth_router
 from app.routers.system import router as system_router
+from app.routers.workspaces import router as workspaces_router
 
 
 def create_app() -> FastAPI:
@@ -17,6 +19,8 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
     )
     app.include_router(system_router, prefix=settings.pika_api_prefix)
+    app.include_router(auth_router, prefix=settings.pika_api_prefix)
+    app.include_router(workspaces_router, prefix=settings.pika_api_prefix)
     return app
 
 
