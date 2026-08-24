@@ -34,32 +34,67 @@ tagging on saved items).
 
 ## Quickstart (local development)
 
+### 1. Clone
+
 ```bash
-# 1. Postgres + Redis (or use your own)
+git clone <this-repo-url> pika
+cd pika
+```
+
+### 2. Start Postgres + Redis
+
+Use your own, or a disposable local container:
+
+```bash
 docker run -d --name pika-postgres -e POSTGRES_USER=pika \
   -e POSTGRES_PASSWORD=pika_dev_local -e POSTGRES_DB=pika \
   -p 5433:5432 postgres:16-alpine
-
-# 2. Backend
-cd api
-cp .env.example .env   # point DATABASE_URL/REDIS_URL at the services above; see below
-uv sync --extra dev
-uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
-
-# 3. Frontend (separate terminal, repo root)
-pnpm install
-pnpm dev   # http://localhost:3000, proxies /api/* to the backend on :8000
+# any local or containerized Redis works for REDIS_URL below
 ```
 
-Generate `ENCRYPTION_KEY` (a real Fernet key — required, not a placeholder):
+### 3. Fill in the env files
+
+Two separate env files — the backend and the client each load their own:
 
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+cp api/.env.example api/.env        # backend: database, redis, auth, discord, stripe
+cp .env.example .env.local          # client: only needed for a split-domain deployment
 ```
 
-Full walkthrough, including the Celery worker/beat and the Discord Gateway connector, is
-in `docs/setup.md`.
+Edit `api/.env`: point `DATABASE_URL`/`REDIS_URL` at the services from step 2, and
+generate a real `ENCRYPTION_KEY` (it must be a valid Fernet key, not an arbitrary
+string — this encrypts Discord tokens and event content at rest):
+
+```bash
+cd api && uv sync --extra dev   # installs cryptography, needed by the script below
+uv run python scripts/generate_encryption_key.py
+```
+
+Paste the output into `ENCRYPTION_KEY` in `api/.env`. `PIKA_SESSION_SECRET` can be any
+random string (`openssl rand -base64 32` works). Leave `DISCORD_*` and `STRIPE_*` blank
+for local development — the app runs fine without them; `GET /api/v1/capabilities`
+reports what's configured. `.env.local` needs nothing filled in for local dev — the Vite
+dev server proxies `/api/*` to the backend same-origin, so `VITE_API_BASE_URL` is only
+required for a split-domain deployment (see `docs/deployment.md`).
+
+### 4. Run the backend
+
+```bash
+cd api
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload    # http://localhost:8000
+```
+
+### 5. Run the client
+
+```bash
+# separate terminal, repo root
+pnpm install
+pnpm dev    # http://localhost:3000, proxies /api/* to the backend on :8000
+```
+
+Sign up at `http://localhost:3000/sign-up` and you're in. Full walkthrough, including the
+Celery worker/beat and the Discord Gateway connector, is in `docs/setup.md`.
 
 ## Tests
 
