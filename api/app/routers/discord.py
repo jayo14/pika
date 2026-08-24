@@ -67,20 +67,20 @@ async def oauth_callback(
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
     frontend_origin = settings.cors_origins[0] if settings.cors_origins else "/"
-    destination = f"{frontend_origin}/settings/integrations"
+    destination = f"{frontend_origin}/settings?tab=integrations"
 
     if error or not code or not state:
-        return RedirectResponse(f"{destination}?discord_status=error", status_code=status.HTTP_302_FOUND)
+        return RedirectResponse(f"{destination}&discord_status=error", status_code=status.HTTP_302_FOUND)
 
     identity = await consume_state(state)
     if identity is None:
-        return RedirectResponse(f"{destination}?discord_status=expired", status_code=status.HTTP_302_FOUND)
+        return RedirectResponse(f"{destination}&discord_status=expired", status_code=status.HTTP_302_FOUND)
     _user_id, workspace_id = identity
 
     try:
         authorization = await exchange_code(settings, code)
     except DiscordOAuthError:
-        return RedirectResponse(f"{destination}?discord_status=error", status_code=status.HTTP_302_FOUND)
+        return RedirectResponse(f"{destination}&discord_status=error", status_code=status.HTTP_302_FOUND)
 
     existing = await db.execute(
         select(DiscordConnection).where(
@@ -109,7 +109,7 @@ async def oauth_callback(
     connection.revoked_at = None
     await db.commit()
 
-    return RedirectResponse(f"{destination}?discord_status=connected", status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(f"{destination}&discord_status=connected", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/connections", response_model=list[DiscordConnectionOut])

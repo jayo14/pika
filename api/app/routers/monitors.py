@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.billing_plans import get_plan_limits, within_limit
 from app.core.deps import NOT_FOUND, ensure_workspace_membership, get_current_user
-from app.db.models import DiscordConnection, Monitor, User
+from app.db.models import DiscordConnection, Monitor, MonitorRule, User
 from app.db.session import get_db
 from app.schemas import MonitorCreate, MonitorOut, MonitorUpdate
 from app.services.billing_service import count_monitors, get_workspace_plan
@@ -67,6 +67,8 @@ async def create_monitor(
         enabled=payload.enabled,
     )
     db.add(monitor)
+    await db.flush()
+    db.add(MonitorRule(monitor_id=monitor.id, field="content", operator="contains", value=payload.keyword))
     await db.commit()
     return MonitorOut.model_validate(monitor)
 

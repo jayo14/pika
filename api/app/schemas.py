@@ -111,6 +111,7 @@ class MonitorCreate(BaseModel):
     monitor_type: str = Field(min_length=1, max_length=32)
     priority: Literal["low", "normal", "high", "critical"] = "normal"
     enabled: bool = True
+    keyword: str = Field(min_length=1, max_length=200, description="Content this monitor watches for (V1: a single contains-keyword rule).")
 
 
 class MonitorUpdate(BaseModel):
