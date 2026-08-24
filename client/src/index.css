@@ -591,3 +591,6 @@ h1, h2, h3, h4 { font-family: var(--headline); font-weight: 400; letter-spacing:
 .pika-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px 18px; border-top: 1px solid #ece7e4; font-size: .62rem; color: var(--muted-ink); }
 .pika-pagination button { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; color: #34333f; background: #ffffffa5; border: 1px solid #fff; border-radius: 8px; padding: 0 10px; font-size: .61rem; }
 .pika-pagination button:disabled { opacity: .45; cursor: default; }
+
+.pika-notification-bell { position: relative; display: inline-flex; color: #56525a; }
+.pika-notification-badge { position: absolute; top: -7px; right: -9px; min-width: 15px; height: 15px; padding: 0 3px; display: flex; align-items: center; justify-content: center; color: #fff; background: var(--coral); border-radius: 999px; font-size: .48rem; font-weight: 700; line-height: 1; }

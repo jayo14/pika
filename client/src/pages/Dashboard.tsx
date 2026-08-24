@@ -1,7 +1,7 @@
 // Pika intelligence home: real signals, saved items, and full-text search from the FastAPI backend.
 import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Bookmark, Check, ChevronDown, Plus, Search, Sparkles } from "lucide-react";
+import { Bell, Bookmark, Check, Plus, Search, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/contexts/AuthContext";
 import { api, type SearchResultItem, type Signal } from "@/lib/api";
@@ -61,6 +61,11 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["signals", workspaceId] });
       queryClient.invalidateQueries({ queryKey: ["saved-items", workspaceId] });
     },
+  });
+
+  const archiveSavedItemMutation = useMutation({
+    mutationFn: (id: string) => api.savedItems.update(id, { status: "archived" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["saved-items", workspaceId] }),
   });
 
   const saveSearchMutation = useMutation({ mutationFn: (id: string) => api.search.save(id) });
@@ -128,7 +133,6 @@ export default function Dashboard() {
         <section className="pika-pulse-panel">
           <div className="pika-panel-head">
             <div><span>Conversation pulse</span><p>Top-scored signals your monitors have surfaced.</p></div>
-            <button type="button">This workspace <ChevronDown size={14} /></button>
           </div>
           <div className="pika-pulse-body">
             <div className="pika-pulse-left">
@@ -201,7 +205,12 @@ export default function Dashboard() {
           <SignalsTable signals={newSignals} title={signalTitle} excerpt={signalExcerpt} onSave={(id) => saveSignalMutation.mutate(id)} />
         )}
         {active === "saved" && (
-          <SavedTable items={savedItems} signalsById={new Map((signalsQuery.data ?? []).map((s) => [s.id, s]))} title={signalTitle} />
+          <SavedTable
+            items={savedItems}
+            signalsById={new Map((signalsQuery.data ?? []).map((s) => [s.id, s]))}
+            title={signalTitle}
+            onArchive={(id) => archiveSavedItemMutation.mutate(id)}
+          />
         )}
       </section>
     </AppShell>
@@ -244,7 +253,17 @@ function SignalsTable({ signals, title, excerpt, onSave }: { signals: Signal[]; 
   );
 }
 
-function SavedTable({ items, signalsById, title }: { items: { id: string; signal_id: string; status: string; created_at: string }[]; signalsById: Map<string, Signal>; title: (s: Signal) => string }) {
+function SavedTable({
+  items,
+  signalsById,
+  title,
+  onArchive,
+}: {
+  items: { id: string; signal_id: string; status: string; created_at: string }[];
+  signalsById: Map<string, Signal>;
+  title: (s: Signal) => string;
+  onArchive: (id: string) => void;
+}) {
   if (!items.length) return <div className="pika-table-empty"><Bookmark size={20} /><b>No saved items yet.</b><span>Save a signal when you want to come back to it.</span></div>;
   return (
     <div className="pika-table-rows">
@@ -255,8 +274,11 @@ function SavedTable({ items, signalsById, title }: { items: { id: string; signal
             <div className="table-conversation"><span className="pika-result-mark orange">★</span><span><b>{signal ? title(signal) : "Saved signal"}</b><small>Saved {new Date(item.created_at).toLocaleDateString()}</small></span></div>
             <span className="table-source">{signal?.kind ?? "—"}</span>
             <span className="table-topic">{item.status}</span>
-            <span className="table-relevance relevance-useful">Saved</span>
-            <button className="is-saved"><Check size={15} /><span>Saved</span></button>
+            {item.status === "archived" ? (
+              <span className="table-relevance relevance-worth-a-look">Archived</span>
+            ) : (
+              <button className="is-saved" onClick={() => onArchive(item.id)}><Check size={15} /><span>Archive</span></button>
+            )}
           </article>
         );
       })}

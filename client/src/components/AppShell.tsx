@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Bell, BookOpen, Bookmark, ChevronDown, CircleHelp, Compass, LayoutDashboard, Menu, MoreHorizontal, Radar, Settings, ShieldCheck, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Bell, BookOpen, Bookmark, ChevronDown, CircleHelp, LayoutDashboard, Menu, MoreHorizontal, Radar, Settings, ShieldCheck, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 
 function Brand() { return <Link className="pika-dash-brand" href="/"><span className="pika-mark" aria-hidden="true" /><span>Pika</span></Link>; }
 
@@ -21,6 +23,14 @@ export function AppShell({ active, title, headerRight, children }: { active: App
 
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId) ?? workspaces[0];
   const initial = (user?.display_name || user?.email || "?").charAt(0).toUpperCase();
+
+  const unreadQuery = useQuery({
+    queryKey: ["notifications", activeWorkspaceId, "unread-count"],
+    queryFn: () => api.notifications.list(activeWorkspaceId as string, true),
+    enabled: Boolean(activeWorkspaceId),
+    refetchInterval: 60_000,
+  });
+  const unreadCount = unreadQuery.data?.length ?? 0;
 
   const toggleSidebar = () => {
     if (window.innerWidth <= 900) setMenuOpen(true);
@@ -64,7 +74,6 @@ export function AppShell({ active, title, headerRight, children }: { active: App
               <Link href="/blog-articles"><BookOpen size={17} /><span>Guides</span></Link>
             </nav>
             <span className="pika-dash-side-label side-label-lower">Workspace tools</span>
-            <Link href="/settings" className={`pika-dash-side-tool ${active === "settings" ? "is-active" : ""}`}><Compass size={17} />Communities</Link>
             {user?.is_staff && <Link href="/admin" className={`pika-dash-side-tool ${active === "admin" ? "is-active" : ""}`}><ShieldCheck size={17} />Admin</Link>}
             <a className="pika-dash-side-tool" href="mailto:support@pika.app"><CircleHelp size={17} />Help & support</a>
           </div>
@@ -89,7 +98,10 @@ export function AppShell({ active, title, headerRight, children }: { active: App
                 <>
                   <span className="pika-dash-avatar">{initial}</span>
                   <span><b>{user?.display_name || user?.email}</b><small>{activeWorkspace?.name ?? "Workspace"}</small></span>
-                  <Bell size={15} />
+                  <Link href="/dashboard" className="pika-notification-bell" aria-label={`${unreadCount} unread notification(s)`}>
+                    <Bell size={15} />
+                    {unreadCount > 0 && <span className="pika-notification-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>}
+                  </Link>
                 </>
               )}
             </div>
