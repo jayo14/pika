@@ -1,0 +1,116 @@
+# Self-contained stack for local/self-hosted deployment. Render deploys each of these as
+# a separate managed service instead (see render.yaml + docs/deployment.md) — this file is
+# for `docker compose up` on a single host, and for validating the images before that.
+#
+# Copy api/.env.example to .env at the repo root (docker compose auto-loads it) and fill
+# in real secrets before running. Do not commit that file.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pika
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pika_dev_local}
+      POSTGRES_DB: pika
+    volumes:
+      - pika_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pika"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - pika_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api: &api_service
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    command: ["serve"]
+    ports:
+      - "8000:8000"
+    environment: &api_environment
+      PIKA_ENV: ${PIKA_ENV:-production}
+      PIKA_API_PREFIX: /api/v1
+      PIKA_CORS_ORIGINS: ${PIKA_CORS_ORIGINS:-http://localhost:8080}
+      DATABASE_URL: postgresql+asyncpg://pika:${POSTGRES_PASSWORD:-pika_dev_local}@postgres:5432/pika
+      REDIS_URL: redis://redis:6379/0
+      PIKA_SESSION_SECRET: ${PIKA_SESSION_SECRET:?set PIKA_SESSION_SECRET in .env}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:-}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    <<: *api_service
+    command: ["worker"]
+    ports: []
+    environment: *api_environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  beat:
+    <<: *api_service
+    command: ["beat"]
+    ports: []
+    environment: *api_environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  gateway:
+    <<: *api_service
+    command: ["gateway"]
+    ports: []
+    environment: *api_environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${CLIENT_API_BASE_URL:-}
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pika_postgres_data:
+  pika_redis_data:

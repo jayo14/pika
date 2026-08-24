@@ -1,0 +1,157 @@
+# Render Blueprint. Deploy: connect the repo in the Render dashboard and it reads this
+# file, or run `render blueprint launch`. See docs/deployment.md for the full walkthrough
+# and for what to double-check before enabling a real Discord connection.
+#
+# NOTE on Redis: `type: keyvalue` is Render's current managed Redis-compatible offering
+# (`redis` is a deprecated alias) as of this writing — Render's blueprint schema does
+# change over time, so re-check against their current docs before deploying. If keyvalue
+# is unavailable on your plan, delete that block and point REDIS_URL (in the envVarGroup
+# below) at an external Redis (e.g. Upstash) instead.
+
+databases:
+  - name: pika-postgres
+    plan: starter
+    databaseName: pika
+    user: pika
+
+services:
+  - type: keyvalue
+    name: pika-redis
+    plan: starter
+    ipAllowList: []
+
+  - type: web
+    name: pika-api
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    dockerCommand: serve
+    plan: starter
+    healthCheckPath: /api/v1/healthz
+    envVars:
+      - key: PIKA_ENV
+        value: production
+      - key: PIKA_API_PREFIX
+        value: /api/v1
+      - fromGroup: pika-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pika-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: pika-redis
+          property: connectionString
+
+  - type: worker
+    name: pika-worker
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    dockerCommand: worker
+    plan: starter
+    envVars:
+      - key: PIKA_ENV
+        value: production
+      - fromGroup: pika-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pika-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: pika-redis
+          property: connectionString
+
+  - type: worker
+    name: pika-beat
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    dockerCommand: beat
+    plan: starter
+    envVars:
+      - key: PIKA_ENV
+        value: production
+      - fromGroup: pika-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pika-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: pika-redis
+          property: connectionString
+
+  - type: worker
+    name: pika-gateway
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    dockerCommand: gateway
+    plan: starter
+    envVars:
+      - key: PIKA_ENV
+        value: production
+      - fromGroup: pika-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pika-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: pika-redis
+          property: connectionString
+
+  - type: web
+    name: pika-client
+    runtime: static
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    staticPublishPath: dist/public
+    envVars:
+      # Split-domain deployment: the client and API are different Render origins, so the
+      # client must know the API's URL at build time (Vite env vars are compile-time).
+      # Set this to https://pika-api.onrender.com (or your custom API domain) once the
+      # API service's URL is known.
+      - key: VITE_API_BASE_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+envVarGroups:
+  - name: pika-shared
+    envVars:
+      # Currently only checked for presence (see discord_capabilities.py), not used to
+      # sign anything — a Render-generated random string is fine.
+      - key: PIKA_SESSION_SECRET
+        generateValue: true
+      # Must be a valid Fernet key (app/core/security.py encrypts Discord tokens and event
+      # payloads with it) — Render's generic generateValue does NOT produce that format.
+      # Generate one with:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # and paste it into the Render dashboard; losing/rotating it makes existing
+      # encrypted rows unreadable, so treat it like any other production secret.
+      - key: ENCRYPTION_KEY
+        sync: false
+      # Must be pika-client's exact Render URL (or custom domain) — see cors_origins in
+      # api/app/core/config.py. The Discord OAuth callback also redirects here.
+      - key: PIKA_CORS_ORIGINS
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_REDIRECT_URI
+        sync: false
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
