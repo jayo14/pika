@@ -1,0 +1,152 @@
+/* Pika precision layer: mobile static-page heroes use the measured source geometry. */
+@media (prefers-reduced-motion: no-preference) {
+  .site-header {
+    position: sticky;
+    top: 0;
+    transition: transform 300ms cubic-bezier(.22, 1, .36, 1), background-color 500ms ease;
+  }
+
+  .site-header.is-scroll-hidden {
+    transform: translateY(-100%);
+  }
+
+  [data-reveal] {
+    opacity: 0;
+    transform: translate3d(0, 100px, 0);
+    transition: opacity 1000ms cubic-bezier(.165, .84, .44, 1), transform 1000ms cubic-bezier(.165, .84, .44, 1);
+    will-change: opacity, transform;
+  }
+
+  [data-reveal="scale"] {
+    transform: scale(.94);
+  }
+
+  [data-reveal-delay="1"] {
+    transition-delay: 110ms;
+  }
+
+  [data-reveal].is-revealed {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  [data-reveal="scale"].is-revealed {
+    transform: scale(1);
+  }
+
+  [data-parallax] {
+    transform: translate3d(0, var(--scroll-offset, 0px), 0);
+    will-change: transform;
+  }
+
+  [data-parallax][data-reveal].is-revealed {
+    transform: translate3d(0, var(--scroll-offset, 0px), 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .page-hero {
+    padding: 34px 0 1.2rem;
+  }
+
+  .page-hero-inner {
+    width: calc(100% - 28px);
+  }
+
+  .page-hero h1 {
+    margin-top: 20px;
+    font-size: 40px;
+    line-height: 50px;
+  }
+
+  .page-hero p {
+    max-width: 347px;
+    margin-top: 10px;
+    font-size: 14px;
+    line-height: 21px;
+  }
+
+  .page-hero:not(.page-hero-compact) p {
+    max-width: 323px;
+  }
+
+  .page-hero .source-button {
+    width: 163px;
+    min-height: 42px;
+    margin-top: 21px;
+    padding: 4px 4px 4px 20px;
+    border-radius: 16px;
+    font-size: 12px;
+  }
+
+  .page-hero .button-round {
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
+  }
+
+  .feature-route-cards {
+    width: 347px;
+    margin-top: 241px;
+    margin-inline: auto;
+    gap: 8px;
+  }
+
+  .feature-route-cards > a {
+    box-sizing: border-box;
+    width: 347px;
+    min-height: 167px;
+    height: 167px;
+    padding: 4px;
+    display: block;
+    position: relative;
+    color: rgb(35 41 49);
+    background: rgb(243 244 246);
+    border: 1px solid #fff;
+    border-radius: 16px;
+    transform: translateX(-2px);
+  }
+
+  .feature-route-cards > a > span {
+    display: none;
+  }
+
+  .feature-route-cards > a > img {
+    width: 20px;
+    height: 20px;
+    position: absolute;
+    top: 29px;
+    left: 29px;
+  }
+
+  .feature-route-cards > a > div {
+    width: 243px;
+    position: absolute;
+    top: 80px;
+    left: 15px;
+  }
+
+  .feature-route-cards > a h2 {
+    margin: 0;
+    font-size: 20px;
+    line-height: 25px;
+  }
+
+  .feature-route-cards > a p {
+    margin-top: 21px;
+    font-size: 14px;
+    line-height: 21px;
+  }
+
+  .feature-route-cards > a > .source-button {
+    display: none;
+  }
+}
