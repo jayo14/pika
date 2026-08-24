@@ -1,0 +1,182 @@
+[
+  {
+    "liveRoute": "/manus-storage/slice-ai-logo_7befa260.svg",
+    "localBackupPath": "/assets/pika/brand-mark.svg",
+    "bytes": 3783,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/6981d1e0d94ebbd54cbf2f1c_5599bd1ea2bd3fd68d6bb31b63521221_SliceAI Logo White_86887816.svg",
+    "localBackupPath": "/assets/pika/brand-mark-white.svg",
+    "bytes": null,
+    "source": "verified-local-fallback"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-hero-dashboard_4f90f240.avif",
+    "localBackupPath": "/assets/pika/hero-dashboard.avif",
+    "bytes": 31608,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-community-search_2b7b5e91.png",
+    "localBackupPath": "/assets/pika/community-search.png",
+    "bytes": 98248,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-monitoring-alerts_447dd00a.png",
+    "localBackupPath": "/assets/pika/monitoring-alerts.png",
+    "bytes": 104838,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-conversation-context_f7f95ddf.png",
+    "localBackupPath": "/assets/pika/conversation-context.png",
+    "bytes": 128330,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-workflow-question_b9c44e9f.png",
+    "localBackupPath": "/assets/pika/workflow-question.png",
+    "bytes": 84940,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-workflow-results_a18dbb91.png",
+    "localBackupPath": "/assets/pika/workflow-results.png",
+    "bytes": 95676,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-workflow-save_9dfbf942.png",
+    "localBackupPath": "/assets/pika/workflow-save.png",
+    "bytes": 215958,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-community-atlas_6d0d70f5.png",
+    "localBackupPath": "/assets/pika/community-atlas.png",
+    "bytes": 112854,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-start-search_440f608b.png",
+    "localBackupPath": "/assets/pika/start-search.png",
+    "bytes": 70640,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-watch-orbit_2ea0bb6d.png",
+    "localBackupPath": "/assets/pika/watch-orbit.png",
+    "bytes": 143494,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-guide-search_6cd85bf9.png",
+    "localBackupPath": "/assets/pika/guide-search.png",
+    "bytes": 78676,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-guide-monitoring_f5d51fcc.png",
+    "localBackupPath": "/assets/pika/guide-monitoring.png",
+    "bytes": 101724,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-guide-save_8be1c373.png",
+    "localBackupPath": "/assets/pika/guide-save.png",
+    "bytes": 157082,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/pika-guide-communities-replacement_fdec4a41.png",
+    "localBackupPath": "/assets/pika/guide-communities.png",
+    "bytes": 108590,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/bg-lines_2009fdd9.svg",
+    "localBackupPath": "/assets/pika/background-lines.svg",
+    "bytes": 1886,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/6985d3832866c8eeb0b92350_system_80c9991a.svg",
+    "localBackupPath": "/assets/pika/system-graphic.svg",
+    "bytes": 34041,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/screen-one_f337d35e.png",
+    "localBackupPath": "/assets/pika/screen-one.png",
+    "bytes": 29781,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/screen-two_42fb8254.png",
+    "localBackupPath": "/assets/pika/screen-two.png",
+    "bytes": 67686,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/slice-hero-orb_46e6a24a.png",
+    "localBackupPath": "/assets/pika/password-visual.png",
+    "bytes": 83886,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/slice-feature-workflow_86ee4b47.png",
+    "localBackupPath": "/assets/pika/style-visual.png",
+    "bytes": 112512,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/article-one_5a0508a7.jpg",
+    "localBackupPath": "/assets/pika/article-one.jpg",
+    "bytes": 85166,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/article-two_cf690649.jpg",
+    "localBackupPath": "/assets/pika/article-two.jpg",
+    "bytes": 196895,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/article-three_7c68bf03.avif",
+    "localBackupPath": "/assets/pika/article-three.avif",
+    "bytes": 9635,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/69874b5c21fc9070b5bc96cc_icons8-commercial-96_3b960442.png",
+    "localBackupPath": "/assets/pika/feature-find.png",
+    "bytes": 1620,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/69874b16de2fccca4ed50b90_icons8-broadcasting-96_245df5a6.png",
+    "localBackupPath": "/assets/pika/feature-communities.png",
+    "bytes": 978,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/6986070198a0b05d3ede1cfe_icons8-combo-chart-96_f5d58377.png",
+    "localBackupPath": "/assets/pika/feature-watch.png",
+    "bytes": 1095,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/69874cbc32684aa70c703bc0_icons8-carton-96_18657653.png",
+    "localBackupPath": "/assets/pika/feature-save.png",
+    "bytes": 569,
+    "source": "managed-storage"
+  },
+  {
+    "liveRoute": "/manus-storage/slice-abstract-grid_79059e43.png",
+    "localBackupPath": "/assets/pika/not-found-grid.png",
+    "bytes": 112906,
+    "source": "managed-storage"
+  }
+]
