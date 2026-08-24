@@ -94,11 +94,13 @@ async def signin(
 
 
 @router.post("/signout", status_code=status.HTTP_204_NO_CONTENT)
-async def signout(request: Request, response: Response) -> None:
+async def signout(
+    request: Request, response: Response, settings: Settings = Depends(get_settings)
+) -> None:
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
     if session_id:
         await destroy_session(session_id)
-    clear_session_cookie(response)
+    clear_session_cookie(response, settings)
 
 
 @router.get("/me", response_model=SessionResponse)
