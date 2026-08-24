@@ -122,6 +122,12 @@ export const api = {
       post<SessionResponse>("/auth/signup", body),
     signin: (body: { email: string; password: string }) => post<SessionResponse>("/auth/signin", body),
     signout: () => post<void>("/auth/signout"),
+    updateProfile: (body: { display_name?: string }) => patch<SessionResponse>("/auth/me", body),
+    changePassword: (body: { current_password: string; new_password: string }) =>
+      post<void>("/auth/change-password", body),
+    requestPasswordReset: (email: string) => post<{ message: string }>("/auth/password-reset/request", { email }),
+    confirmPasswordReset: (token: string, new_password: string) =>
+      post<void>("/auth/password-reset/confirm", { token, new_password }),
   },
   workspaces: {
     list: () => get<Workspace[]>("/workspaces"),

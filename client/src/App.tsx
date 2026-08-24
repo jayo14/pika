@@ -10,7 +10,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Home from "@/pages/Home";
 import { AboutPage, AdminPage, BlogPage, ContactPage, FAQPage, FeaturesPage, LegalPage, PricingPage } from "@/pages/StaticPages";
 import { ArticleDetail, FeatureDetail, PasswordPage, SourceNotFound } from "@/pages/DynamicPages";
-import { ForgotPasswordPage, SignInPage, SignUpPage } from "@/pages/AuthPages";
+import { ForgotPasswordPage, ResetPasswordPage, SignInPage, SignUpPage } from "@/pages/AuthPages";
 import Dashboard from "@/pages/Dashboard";
 import MonitorsPage from "@/pages/Monitors";
 import SavedPage from "@/pages/Saved";
@@ -83,6 +83,7 @@ function Router() { return <><ScrollTop /><Switch>
   <Route path="/sign-in"><SignInPage /></Route>
   <Route path="/sign-up"><SignUpPage /></Route>
   <Route path="/forgot-password"><ForgotPasswordPage /></Route>
+  <Route path="/reset-password"><ResetPasswordPage /></Route>
   <Route path="/dashboard"><RequireAuth><Dashboard /></RequireAuth></Route>
   <Route path="/monitors"><RequireAuth><MonitorsPage /></RequireAuth></Route>
   <Route path="/saved"><RequireAuth><SavedPage /></RequireAuth></Route>
