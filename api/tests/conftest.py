@@ -23,7 +23,8 @@ async def _clean_state():
             text(
                 "TRUNCATE users, workspaces, workspace_memberships, discord_connections, "
                 "connection_channels, communities, monitors, monitor_rules, events, signals, "
-                "saved_items, tags, saved_item_tags, notifications, audit_logs CASCADE"
+                "saved_items, tags, saved_item_tags, notifications, audit_logs, "
+                "notification_preferences, searches, subscriptions CASCADE"
             )
         )
     redis = get_redis()

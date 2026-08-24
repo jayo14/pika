@@ -19,7 +19,8 @@ dependencies = [
   "cryptography>=43.0,<44.0",
   "argon2-cffi>=23.1,<24.0",
   "celery>=5.4,<6.0",
-  "email-validator>=2.2,<3.0"
+  "email-validator>=2.2,<3.0",
+  "discord.py>=2.4,<3.0"
 ]
 
 [project.optional-dependencies]
@@ -45,5 +46,6 @@ target-version = "py311"
 
 [tool.ruff.lint]
 ignore = [
-  "B008", # FastAPI's Depends()-in-default-argument is the framework's idiomatic DI pattern.
+  "B008",   # FastAPI's Depends()-in-default-argument is the framework's idiomatic DI pattern.
+  "BLE001", # Health checks and best-effort background handlers intentionally catch broadly.
 ]

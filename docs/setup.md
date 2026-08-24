@@ -80,8 +80,15 @@ long-running or scheduled work never executes inside an HTTP request.
    uv run celery -A app.workers.celery_app worker --loglevel=info
    uv run celery -A app.workers.celery_app beat --loglevel=info
    ```
-5. Configure OAuth redirect URLs and bot scopes in the Discord Developer Portal, matching
-   `DISCORD_REDIRECT_URI`.
+5. Configure OAuth redirect URLs, bot scopes, and the privileged **Message Content**
+   intent in the Discord Developer Portal, matching `DISCORD_REDIRECT_URI`. Then start the
+   Gateway connector — the process holding the live websocket connection for the
+   administrator-installed bot:
+   ```bash
+   uv run python -m app.workers.gateway
+   ```
+   With `DISCORD_BOT_TOKEN` unset it logs a dry-run notice and exits cleanly rather than
+   connecting — safe to leave out of local development until a real bot is configured.
 6. Run the test suite: `uv run pytest`. It truncates the configured dev database and
    flushes the configured Redis database before every test, so never point `DATABASE_URL`
    or `REDIS_URL` at a database holding data you need.
