@@ -99,7 +99,17 @@ export type Subscription = { workspace_id: string; plan: string; status: string;
 export type Usage = { workspace_id: string; plan: string; limits: PlanLimits; monitors_used: number; connections_used: number; saved_searches_used: number };
 
 export type AdminUser = { id: string; email: string; display_name: string | null; status: string; is_staff: boolean; created_at: string };
+export type AdminUserList = { items: AdminUser[]; total: number };
+export type AdminUserWorkspaceMembership = { workspace_id: string; workspace_name: string; role: string };
+export type AdminUserDetail = AdminUser & { workspaces: AdminUserWorkspaceMembership[] };
+
 export type AdminWorkspace = { id: string; name: string; owner_user_id: string; retention_days: number; created_at: string; plan: string; member_count: number; connection_count: number; monitor_count: number };
+export type AdminWorkspaceList = { items: AdminWorkspace[]; total: number };
+export type AdminWorkspaceMember = { user_id: string; email: string; role: string };
+export type AdminWorkspaceConnection = { id: string; discord_guild_id: string; discord_guild_name: string | null; status: string };
+export type AdminWorkspaceMonitor = { id: string; name: string; monitor_type: string; enabled: boolean };
+export type AdminWorkspaceDetail = AdminWorkspace & { members: AdminWorkspaceMember[]; connections: AdminWorkspaceConnection[]; monitors: AdminWorkspaceMonitor[] };
+
 export type AdminSystemHealth = { database: "ok" | "error"; redis: "ok" | "error"; celery_workers_online: number; total_users: number; total_workspaces: number; total_active_connections: number; events_pending_expiry_next_24h: number };
 
 // ---- API surface ----
@@ -158,8 +168,22 @@ export const api = {
     changePlan: (workspace_id: string, plan: string) => post<Subscription>(`/billing/plan?workspace_id=${workspace_id}`, { plan }),
   },
   admin: {
-    users: () => get<AdminUser[]>("/admin/users"),
-    workspaces: () => get<AdminWorkspace[]>("/admin/workspaces"),
+    users: (params: { limit?: number; offset?: number; q?: string } = {}) => {
+      const search = new URLSearchParams();
+      if (params.limit) search.set("limit", String(params.limit));
+      if (params.offset) search.set("offset", String(params.offset));
+      if (params.q) search.set("q", params.q);
+      return get<AdminUserList>(`/admin/users?${search.toString()}`);
+    },
+    userDetail: (id: string) => get<AdminUserDetail>(`/admin/users/${id}`),
+    workspaces: (params: { limit?: number; offset?: number; q?: string } = {}) => {
+      const search = new URLSearchParams();
+      if (params.limit) search.set("limit", String(params.limit));
+      if (params.offset) search.set("offset", String(params.offset));
+      if (params.q) search.set("q", params.q);
+      return get<AdminWorkspaceList>(`/admin/workspaces?${search.toString()}`);
+    },
+    workspaceDetail: (id: string) => get<AdminWorkspaceDetail>(`/admin/workspaces/${id}`),
     systemHealth: () => get<AdminSystemHealth>("/admin/system-health"),
   },
 };
