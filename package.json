@@ -5,15 +5,15 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "dev": "pnpm --dir frontend dev",
-    "build": "pnpm --dir frontend build",
-    "preview": "pnpm --dir frontend preview",
-    "check": "pnpm --dir frontend check && python3 -m compileall -q api/app",
-    "check:frontend": "pnpm --dir frontend check",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit && python3 -m compileall -q api/app",
+    "check:frontend": "tsc --noEmit",
     "check:api": "python3 -m compileall -q api/app",
     "test:api": "cd api && pytest -q",
     "generate:sitemap": "node scripts/generate-sitemap.mjs",
-    "format:frontend": "pnpm --dir frontend exec prettier --write ."
+    "format:frontend": "prettier --write ."
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -43,6 +43,7 @@
     "@radix-ui/react-toggle": "^1.1.10",
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@tanstack/react-query": "^5.102.2",
     "axios": "^1.12.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
