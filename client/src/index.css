@@ -491,3 +491,85 @@ h1, h2, h3, h4 { font-family: var(--headline); font-weight: 400; letter-spacing:
 }
 @media (max-width: 900px) { .pika-dash-page { padding: 0; }.pika-dash-shell { min-height: 100vh; border: 0; border-radius: 0; }.pika-dash-sidebar { min-height: 100vh; top: 0; bottom: 0; left: 0; border-radius: 0 22px 22px 0; }.pika-dash-menu { margin-right: 9px; }.auth-visual-signin { width: min(680px, 105%); right: -18%; bottom: -6%; } }
 @media (max-width: 760px) { .auth-visual-signin { width: 70%; right: -12%; bottom: -14%; transform: rotate(-4deg) scale(1.05); }.auth-visual-signin img { filter: blur(.25px) saturate(.94); } }
+
+/* App shell: real workspace switcher, admin/settings nav highlighting, loading state */
+.pika-route-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: var(--muted-ink); font-size: .85rem; }
+.pika-dash-workspace { position: relative; cursor: pointer; }
+.pika-dash-workspace select { position: absolute; inset: 0; opacity: 0; cursor: pointer; border: 0; appearance: none; }
+.pika-dash-side-tool.is-active { color: #252937; background: #ffffff8c; border-color: #fff; box-shadow: 0 6px 16px #5e473412; }
+
+/* Shared "app content" building blocks reused by Monitors, Saved, Settings, Admin */
+.pika-page-block { margin-top: 15px; }
+.pika-page-block:first-of-type { margin-top: 0; }
+.pika-empty-inline { color: var(--subtle-ink); font-size: .62rem; padding: 10px 0; }
+.pika-empty-inline-dark { color: #ffffffa6; }
+
+.pika-tab-switch { display: flex; gap: 4px; background: #f0ebe8; border-radius: 10px; padding: 3px; }
+.pika-tab-switch button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: #6d6971; border-radius: 8px; padding: 6px 10px; font-size: .64rem; font-weight: 500; }
+.pika-tab-switch button.is-active { background: #fff; color: #252937; box-shadow: 0 3px 10px #0000000f; }
+.pika-tab-switch button i { background: #ef5a90; color: #fff; border-radius: 99px; padding: 1px 5px; font-size: .52rem; font-style: normal; }
+.pika-save-search { display: inline-flex; align-items: center; gap: 4px; min-height: 33px; color: #34333f; background: #ffffffa5; border: 1px solid #fff; border-radius: 9px; padding: 0 9px; font-size: .61rem; margin-left: 8px; }
+.pika-save-search:disabled { opacity: .6; cursor: default; }
+
+.pika-form { padding: 14px 18px 18px; border-bottom: 1px solid #ece7e4; }
+.pika-form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.pika-form label { display: flex; flex-direction: column; gap: 5px; font-size: .63rem; color: var(--muted-ink); font-weight: 500; }
+.pika-form input, .pika-form select, .pika-form textarea { border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; font-size: .72rem; background: #fff; color: var(--ink); font-family: var(--body); }
+.pika-form-hint { color: var(--subtle-ink); font-size: .65rem; }
+.pika-form-error { color: #bf3d62; font-size: .62rem; margin: 4px 0 10px; }
+.pika-form-error-inline { padding: 0 18px 14px; }
+.pika-form-submit { min-height: 36px; color: #fff; background: #292936; border: 0; border-radius: 9px; padding: 0 16px; font-size: .68rem; font-weight: 600; }
+.pika-form-submit:hover { background: #15151f; }
+.pika-form-submit:disabled { opacity: .65; cursor: default; }
+
+.pika-switch { display: inline-flex; align-items: center; gap: 7px; font-size: .62rem; color: var(--muted-ink); cursor: pointer; }
+.pika-switch input { width: 30px; height: 17px; appearance: none; background: #d9d4d1; border-radius: 99px; position: relative; cursor: pointer; transition: background 160ms var(--ease); }
+.pika-switch input::after { content: ""; position: absolute; width: 13px; height: 13px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: left 160ms var(--ease); box-shadow: 0 1px 3px #0003; }
+.pika-switch input:checked { background: var(--violet); }
+.pika-switch input:checked::after { left: 15px; }
+.pika-switch-inline { align-self: flex-end; padding-bottom: 8px; }
+
+.pika-icon-button { display: inline-flex; align-items: center; gap: 4px; min-height: 29px; color: #6b6670; background: #ffffffaa; border: 1px solid #fff; border-radius: 8px; padding: 0 8px; font-size: .58rem; }
+.pika-icon-button:disabled { opacity: .5; cursor: default; }
+
+.pika-monitor-rows article, .pika-monitor-rows { grid-template-columns: minmax(220px, 2fr) 1fr 1fr 40px; }
+
+.pika-saved-list { display: grid; gap: 10px; padding: 14px 18px 18px; }
+.pika-saved-row { display: grid; grid-template-columns: minmax(220px, 1.4fr) 130px 1fr; gap: 12px; align-items: start; background: #ffffff9c; border: 1px solid #fff; border-radius: 13px; padding: 12px; }
+.pika-saved-row select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: .64rem; height: fit-content; }
+.pika-saved-row textarea { border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: .66rem; min-height: 44px; resize: vertical; font-family: var(--body); }
+
+.pika-settings-tabs { display: flex; gap: 6px; margin-bottom: 15px; flex-wrap: wrap; }
+.pika-settings-tabs button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; color: #6d6971; background: #ffffff85; border: 1px solid #fff; border-radius: 10px; padding: 0 12px; font-size: .65rem; font-weight: 500; }
+.pika-settings-tabs button.is-active { color: #fff; background: #292936; border-color: #292936; }
+
+.pika-banner { border-radius: 12px; padding: 10px 14px; font-size: .68rem; margin-bottom: 15px; }
+.pika-banner-success { background: #e6f6ec; color: #1f7a45; }
+.pika-banner-error { background: #ffe5ed; color: #bf3d62; }
+
+.pika-channel-editor { padding: 14px 18px 18px; border-top: 1px solid #ece7e4; }
+.pika-channel-editor > p { color: var(--subtle-ink); font-size: .62rem; margin-bottom: 10px; }
+.pika-channel-editor .pika-form-row { grid-template-columns: 1fr auto; margin-bottom: 12px; }
+.pika-channel-editor button { min-height: 36px; color: #fff; background: #292936; border: 0; border-radius: 9px; padding: 0 14px; font-size: .65rem; }
+.pika-channel-list { display: grid; gap: 6px; }
+.pika-channel-list li { display: flex; align-items: center; gap: 10px; background: #ffffff9c; border: 1px solid #fff; border-radius: 9px; padding: 7px 10px; font-size: .63rem; }
+.pika-channel-list li em { color: var(--subtle-ink); font-style: normal; }
+.pika-channel-list li span { flex: 1; font-family: monospace; }
+.pika-channel-list li button { margin-left: auto; color: #bf3d62; background: transparent; border: 0; font-size: .6rem; }
+
+.pika-usage-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; padding: 14px 18px; border-bottom: 1px solid #ece7e4; }
+.pika-usage-row small { display: block; color: var(--subtle-ink); font-size: .58rem; }
+.pika-usage-row b { display: block; margin-top: 3px; font-size: .95rem; letter-spacing: -.03em; }
+
+.pika-plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; padding: 16px 18px 20px; }
+.pika-plan-card { border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 6px; background: #fff; }
+.pika-plan-card.is-current { border-color: var(--violet); box-shadow: 0 0 0 2px #6353e31a; }
+.pika-plan-name { font-size: .78rem; font-weight: 600; }
+.pika-plan-price { font-size: 1.3rem; letter-spacing: -.04em; }
+.pika-plan-card p { color: var(--muted-ink); font-size: .62rem; flex: 1; }
+.pika-plan-card button { min-height: 34px; color: #fff; background: #292936; border: 0; border-radius: 9px; font-size: .64rem; margin-top: 6px; }
+.pika-plan-card button:disabled { background: #e6e8eb; color: var(--subtle-ink); cursor: default; }
+
+.pika-account-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; padding: 16px 18px 20px; }
+.pika-account-details small { display: block; color: var(--subtle-ink); font-size: .58rem; }
+.pika-account-details b { display: block; margin-top: 4px; font-size: .78rem; }

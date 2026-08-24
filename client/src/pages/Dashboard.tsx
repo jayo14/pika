@@ -1,52 +1,251 @@
-// Pika dashboard redesign: warm glass workspace inspired by the supplied reference, with useful conversation actions instead of generic company metrics.
+// Pika intelligence home: real signals, saved items, and full-text search from the FastAPI backend.
 import { FormEvent, useMemo, useState } from "react";
-import { Link } from "wouter";
-import { Bell, Bookmark, BookOpen, Check, ChevronDown, CircleHelp, Compass, LayoutDashboard, Menu, MoreHorizontal, Plus, Search, Settings, Sparkles, X } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bell, Bookmark, Check, ChevronDown, Plus, Search, Sparkles } from "lucide-react";
+import { AppShell } from "@/components/AppShell";
+import { useAuth } from "@/contexts/AuthContext";
+import { api, type SearchResultItem, type Signal } from "@/lib/api";
 
-type Result = { id: string; title: string; source: string; channel: string; excerpt: string; tags: string[]; mark: string; accent: string; relevance: "High" | "Useful" | "Worth a look" };
+type Tab = "search" | "signals" | "saved";
 
-const results: Result[] = [
-  { id: "react", title: "Looking for a React developer for a dashboard", source: "Indie Hackers", channel: "#hiring", excerpt: "We are building an internal dashboard for our SaaS. Looking for a React developer who can ship a clear first version.", tags: ["Hiring", "React"], mark: "#", accent: "coral", relevance: "High" },
-  { id: "next", title: "Need help with a Next.js build", source: "Next.js Community", channel: "#help", excerpt: "Our production build breaks after a dependency update. Has anyone seen this error before?", tags: ["Developer help", "Next.js"], mark: "↗", accent: "violet", relevance: "Useful" },
-  { id: "agency", title: "Which design agency would you recommend?", source: "Product Marketing Group", channel: "#recommendations", excerpt: "We need a small team that can help with a launch page and our first paid campaign.", tags: ["Agency search", "Marketing"], mark: "✦", accent: "orange", relevance: "High" },
-  { id: "onboarding", title: "What is making onboarding hard to finish?", source: "SaaS Operators", channel: "#product", excerpt: "We are hearing that setup feels like too much work. Looking for examples that solved the first-session problem.", tags: ["Onboarding", "Product"], mark: "●", accent: "pink", relevance: "Worth a look" },
-];
+function relevanceFromRank(rank: number): "High" | "Useful" | "Worth a look" {
+  if (rank > 0.1) return "High";
+  if (rank > 0.03) return "Useful";
+  return "Worth a look";
+}
+
+function relevanceFromScore(score: number): "High" | "Useful" | "Worth a look" {
+  if (score >= 70) return "High";
+  if (score >= 50) return "Useful";
+  return "Worth a look";
+}
 
 const quickSearches = ["React developer", "Design agency", "Onboarding", "Product marketing"];
-const initialWatchlist = ["React developer", "Design agency", "Onboarding"];
-
-function Brand() { return <Link className="pika-dash-brand" href="/"><span className="pika-mark" aria-hidden="true" /><span>Pika</span></Link>; }
 
 export default function Dashboard() {
+  const { activeWorkspaceId } = useAuth();
+  const queryClient = useQueryClient();
+  const workspaceId = activeWorkspaceId ?? "";
+
   const [query, setQuery] = useState("Find people looking for a React developer");
-  const [submittedQuery, setSubmittedQuery] = useState(query);
-  const [saved, setSaved] = useState<string[]>(["agency"]);
-  const [watchlist, setWatchlist] = useState(initialWatchlist);
-  const [active, setActive] = useState<"search" | "watching" | "saved">("search");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [active, setActive] = useState<Tab>("search");
 
-  const visibleResults = useMemo(() => {
-    if (active === "saved") return results.filter((item) => saved.includes(item.id));
-    if (active === "watching") return results.filter((item) => watchlist.some((topic) => `${item.title} ${item.excerpt} ${item.tags.join(" ")}`.toLowerCase().includes(topic.toLowerCase().split(" ")[0])));
-    const normalized = submittedQuery.toLowerCase();
-    const selected = results.filter((item) => `${item.title} ${item.excerpt} ${item.tags.join(" ")}`.toLowerCase().split(" ").some((word) => word.length > 3 && normalized.includes(word)));
-    return selected.length ? selected : results;
-  }, [active, saved, submittedQuery, watchlist]);
+  const signalsQuery = useQuery({
+    queryKey: ["signals", workspaceId],
+    queryFn: () => api.signals.list(workspaceId),
+    enabled: Boolean(workspaceId),
+  });
+  const savedQuery = useQuery({
+    queryKey: ["saved-items", workspaceId],
+    queryFn: () => api.savedItems.list(workspaceId),
+    enabled: Boolean(workspaceId),
+  });
+  const monitorsQuery = useQuery({
+    queryKey: ["monitors", workspaceId],
+    queryFn: () => api.monitors.list(workspaceId),
+    enabled: Boolean(workspaceId),
+  });
+  const notificationsQuery = useQuery({
+    queryKey: ["notifications", workspaceId],
+    queryFn: () => api.notifications.list(workspaceId, true),
+    enabled: Boolean(workspaceId),
+  });
 
-  const submitSearch = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); setSubmittedQuery(query); setActive("search"); };
-  const toggleSave = (id: string) => setSaved((items) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id]);
-  const toggleWatch = (topic: string) => setWatchlist((items) => items.includes(topic) ? items.filter((item) => item !== topic) : [...items, topic]);
-  const chooseQuickSearch = (text: string) => { const next = `Find ${text.toLowerCase()} conversations`; setQuery(next); setSubmittedQuery(next); setActive("search"); };
-  const setView = (view: "search" | "watching" | "saved") => { setActive(view); setMenuOpen(false); };
-  const toggleSidebar = () => { if (window.innerWidth <= 900) setMenuOpen(true); else setSidebarExpanded((expanded) => !expanded); };
-  const navItems = [{ id: "search" as const, label: "Dashboard", icon: LayoutDashboard }, { id: "watching" as const, label: "Watching", icon: Bell }, { id: "saved" as const, label: "Saved", icon: Bookmark }];
-  const statusLabel = active === "search" ? "Conversation search" : active === "watching" ? "Watched topics" : "Saved conversations";
+  const searchMutation = useMutation({
+    mutationFn: (q: string) => api.search.run(workspaceId, q),
+  });
 
-  return <main className="pika-dash-page"><div className="pika-dash-orbit orbit-one" /><div className="pika-dash-orbit orbit-two" /><div className={`pika-dash-shell ${sidebarExpanded ? "sidebar-expanded" : ""}`}><aside className={`pika-dash-sidebar ${menuOpen ? "is-open" : ""} ${sidebarExpanded ? "is-expanded" : ""}`}><div><div className="pika-dash-side-head"><Brand /><button className="pika-dash-close" aria-label="Close workspace menu" onClick={() => setMenuOpen(false)}><X size={18} /></button></div><button className="pika-dash-workspace" type="button"><span className="pika-dash-initial">P</span><span><b>Demo workspace</b><small>Personal workspace</small></span><ChevronDown size={15} /></button><span className="pika-dash-side-label">Workspace</span><nav aria-label="Workspace navigation">{navItems.map((item) => { const Icon = item.icon; return <button className={active === item.id ? "is-active" : ""} key={item.id} onClick={() => setView(item.id)}><Icon size={17} /><span>{item.label}</span>{item.id === "watching" && <i>New</i>}</button>; })}<Link href="/blog-articles"><BookOpen size={17} /><span>Guides</span></Link></nav><span className="pika-dash-side-label side-label-lower">Workspace tools</span><button className="pika-dash-side-tool" type="button"><Compass size={17} />Communities</button><button className="pika-dash-side-tool" type="button"><CircleHelp size={17} />Help & support</button></div><div className="pika-dash-profile"><button type="button"><Settings size={17} />Settings</button><Link href="/"><span className="pika-dash-initial initial-a">A</span><span><b>Alex Morgan</b><small>admin@pika.io</small></span><MoreHorizontal size={17} /></Link></div></aside><div className="pika-dash-backdrop" onClick={() => setMenuOpen(false)} />
-      <section className="pika-dash-main"><header className="pika-dash-topbar"><div><button className="pika-dash-menu" aria-label="Toggle workspace navigation" aria-pressed={sidebarExpanded} onClick={toggleSidebar}><Menu size={20} /></button><h1>{active === "search" ? "Dashboard" : active === "watching" ? "Watching" : "Saved"}</h1></div><div className="pika-dash-account"><span className="pika-dash-avatar">A</span><span><b>Alex Morgan</b><small>Demo workspace</small></span><ChevronDown size={15} /></div></header><div className="pika-dash-content"><section className="pika-dash-search-area"><div><span className="pika-dash-kicker"><Sparkles size={14} />Pika workspace</span><h2>{active === "search" ? "Find the useful part of the conversation." : active === "watching" ? "Keep track of the questions you care about." : "Keep the conversations you want to revisit."}</h2></div><form onSubmit={submitSearch}><Search size={18} /><input aria-label="Search conversations" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find people looking for a React developer" /><button type="submit">Search</button></form><div className="pika-dash-quick"><span>Try a search:</span>{quickSearches.map((item) => <button type="button" key={item} onClick={() => chooseQuickSearch(item)}>{item}</button>)}</div></section>
-        <section className="pika-dash-summary"><article><span className="summary-icon coral"><Search size={17} /></span><div><small>Useful results</small><b>{visibleResults.length}</b></div><em>For this view</em></article><article><span className="summary-icon violet"><Bell size={17} /></span><div><small>Topics watching</small><b>{watchlist.length}</b></div><em>Your list</em></article><article><span className="summary-icon orange"><Bookmark size={17} /></span><div><small>Saved threads</small><b>{saved.length}</b></div><em>Come back later</em></article></section>
-        <div className="pika-dash-grid"><section className="pika-pulse-panel"><div className="pika-panel-head"><div><span>Conversation pulse</span><p>{active === "search" ? `What the current search brings together.` : `${statusLabel} in your demo workspace.`}</p></div><button type="button">This week <ChevronDown size={14} /></button></div><div className="pika-pulse-body"><div className="pika-pulse-left"><h3>{submittedQuery || "Start with a question"}</h3><p>Search, review, and save the conversations that are worth your time.</p><div className="pika-pulse-chart" aria-label="Illustrative conversation activity"><span className="chart-bar bar-one" /><span className="chart-bar bar-two" /><span className="chart-bar bar-three" /><span className="chart-bar bar-four" /><span className="chart-bar bar-five" /><span className="chart-line" /></div><div className="pika-chart-legend"><span><i className="legend-coral" />Requests</span><span><i className="legend-violet" />Questions</span><span><i className="legend-orange" />Recommendations</span></div></div><div className="pika-thread-rank"><h4>Useful threads</h4>{results.slice(0, 3).map((item, index) => <button key={item.id} onClick={() => toggleSave(item.id)}><span className={`rank-count rank-${index + 1}`}>{index + 1}</span><span className={`pika-result-mark ${item.accent}`}>{item.mark}</span><span><b>{item.title}</b><small>{saved.includes(item.id) ? "Saved for later" : item.source}</small></span></button>)}</div></div></section>
-          <aside className="pika-dash-right"><section className="pika-activity-card"><span>New conversations</span><p>Topics from your watchlist.</p><div className="pika-activity-list">{results.slice(0, 3).map((item) => <button key={item.id} onClick={() => setView("watching")}><i /><div><b>{item.title}</b><small>{item.source} · {item.channel}</small></div><span className={`pika-result-mark ${item.accent}`}>{item.mark}</span></button>)}</div></section><section className="pika-watch-card"><div><span>Watchlist</span><button type="button" aria-label="Add topic to watchlist"><Plus size={15} /></button></div><p>Choose topics Pika should keep an eye on.</p>{initialWatchlist.map((topic, index) => <button className={watchlist.includes(topic) ? "is-watching" : ""} key={topic} onClick={() => toggleWatch(topic)}><i className={`watch-color-${index}`} /><span>{topic}</span><em>{watchlist.includes(topic) ? "Watching" : "Watch"}</em></button>)}</section></aside></div>
-        <section className="pika-conversations-table"><div className="pika-table-head"><div><span>{active === "search" ? "Recent conversations" : active === "watching" ? "Matches from your watchlist" : "Your saved conversations"}</span><p>{active === "search" ? `Showing conversations for “${submittedQuery}”` : active === "watching" ? "Topics that match your active watchlist." : "A short list for later."}</p></div><button onClick={() => setView("search")}><Plus size={15} />New search</button></div><div className="pika-table-labels"><span>Conversation</span><span>Source</span><span>Topic</span><span>Relevance</span><span /></div><div className="pika-table-rows">{visibleResults.length ? visibleResults.map((item) => <article key={item.id}><div className="table-conversation"><span className={`pika-result-mark ${item.accent}`}>{item.mark}</span><span><b>{item.title}</b><small>{item.excerpt}</small></span></div><span className="table-source">{item.source}</span><span className="table-topic">{item.tags[0]}</span><span className={`table-relevance relevance-${item.relevance.toLowerCase().replaceAll(" ", "-")}`}>{item.relevance}</span><button className={saved.includes(item.id) ? "is-saved" : ""} onClick={() => toggleSave(item.id)} aria-pressed={saved.includes(item.id)}>{saved.includes(item.id) ? <Check size={15} /> : <Bookmark size={15} />}<span>{saved.includes(item.id) ? "Saved" : "Save"}</span></button></article>) : <div className="pika-table-empty"><Bookmark size={20} /><b>No saved conversations yet.</b><span>Save a conversation when you want to come back to it.</span><button onClick={() => setView("search")}>Find conversations</button></div>}</div></section></div></section></div></main>;
+  const saveSignalMutation = useMutation({
+    mutationFn: (id: string) => api.signals.save(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["signals", workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ["saved-items", workspaceId] });
+    },
+  });
+
+  const saveSearchMutation = useMutation({ mutationFn: (id: string) => api.search.save(id) });
+
+  const monitorNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const monitor of monitorsQuery.data ?? []) map.set(monitor.id, monitor.name);
+    return map;
+  }, [monitorsQuery.data]);
+
+  const newSignals = (signalsQuery.data ?? []).filter((s) => s.status === "new");
+  const savedItems = savedQuery.data ?? [];
+  const unreadNotifications = notificationsQuery.data ?? [];
+  const searchResults = searchMutation.data?.results ?? [];
+
+  const submitSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setActive("search");
+    if (workspaceId && query.trim()) searchMutation.mutate(query.trim());
+  };
+  const chooseQuickSearch = (text: string) => {
+    const next = `Find ${text.toLowerCase()} conversations`;
+    setQuery(next);
+    setActive("search");
+    if (workspaceId) searchMutation.mutate(next);
+  };
+
+  const signalTitle = (signal: Signal) => monitorNameById.get(signal.monitor_id) ?? signal.kind;
+  const signalExcerpt = (signal: Signal) => signal.explanation.reasons.map((r) => r.description).join("; ") || "Matched a monitor rule.";
+
+  const statusLabel = active === "search" ? "Search results" : active === "signals" ? "New signals" : "Saved items";
+
+  return (
+    <AppShell active="dashboard" title="Dashboard">
+      <section className="pika-dash-search-area">
+        <div>
+          <span className="pika-dash-kicker"><Sparkles size={14} />Pika workspace</span>
+          <h2>{active === "search" ? "Find the useful part of the conversation." : active === "signals" ? "See what your monitors caught." : "Revisit what you saved."}</h2>
+        </div>
+        <form onSubmit={submitSearch}>
+          <Search size={18} />
+          <input aria-label="Search conversations" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find people looking for a React developer" />
+          <button type="submit" disabled={searchMutation.isPending}>{searchMutation.isPending ? "Searching…" : "Search"}</button>
+        </form>
+        <div className="pika-dash-quick">
+          <span>Try a search:</span>
+          {quickSearches.map((item) => <button type="button" key={item} onClick={() => chooseQuickSearch(item)}>{item}</button>)}
+        </div>
+      </section>
+
+      <section className="pika-dash-summary">
+        <article><span className="summary-icon coral"><Search size={17} /></span><div><small>Search results</small><b>{searchResults.length}</b></div><em>Last search</em></article>
+        <article><span className="summary-icon violet"><Bell size={17} /></span><div><small>New signals</small><b>{newSignals.length}</b></div><em>Across monitors</em></article>
+        <article><span className="summary-icon orange"><Bookmark size={17} /></span><div><small>Saved items</small><b>{savedItems.length}</b></div><em>Come back later</em></article>
+      </section>
+
+      <div className="pika-dash-grid">
+        <section className="pika-pulse-panel">
+          <div className="pika-panel-head">
+            <div><span>Conversation pulse</span><p>Top-scored signals your monitors have surfaced.</p></div>
+            <button type="button">This workspace <ChevronDown size={14} /></button>
+          </div>
+          <div className="pika-pulse-body">
+            <div className="pika-pulse-left">
+              <h3>{newSignals.length ? "New signals waiting for review" : "No new signals yet"}</h3>
+              <p>Connect a server and create a monitor to start surfacing opportunities automatically.</p>
+              <div className="pika-pulse-chart" aria-label="Illustrative conversation activity">
+                <span className="chart-bar bar-one" /><span className="chart-bar bar-two" /><span className="chart-bar bar-three" /><span className="chart-bar bar-four" /><span className="chart-bar bar-five" /><span className="chart-line" />
+              </div>
+            </div>
+            <div className="pika-thread-rank">
+              <h4>Top signals</h4>
+              {newSignals.slice(0, 3).map((signal, index) => (
+                <button key={signal.id} onClick={() => saveSignalMutation.mutate(signal.id)}>
+                  <span className={`rank-count rank-${index + 1}`}>{index + 1}</span>
+                  <span className={`pika-result-mark ${["coral", "violet", "orange"][index % 3]}`}>{Math.round(signal.score)}</span>
+                  <span><b>{signalTitle(signal)}</b><small>{signalExcerpt(signal)}</small></span>
+                </button>
+              ))}
+              {!newSignals.length && <p className="pika-empty-inline">Nothing here yet.</p>}
+            </div>
+          </div>
+        </section>
+        <aside className="pika-dash-right">
+          <section className="pika-activity-card">
+            <span>Unread notifications</span>
+            <p>Selective alerts from your monitors.</p>
+            <div className="pika-activity-list">
+              {unreadNotifications.slice(0, 4).map((n) => (
+                <button key={n.id} onClick={() => api.notifications.markRead(n.id).then(() => queryClient.invalidateQueries({ queryKey: ["notifications", workspaceId] }))}>
+                  <i />
+                  <div><b>{n.priority} priority signal</b><small>{new Date(n.created_at).toLocaleString()}</small></div>
+                  <span className="pika-result-mark violet">!</span>
+                </button>
+              ))}
+              {!unreadNotifications.length && <p className="pika-empty-inline pika-empty-inline-dark">You're all caught up.</p>}
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      <section className="pika-conversations-table">
+        <div className="pika-table-head">
+          <div>
+            <span>{statusLabel}</span>
+            <p>{active === "search" ? `Showing results for “${searchMutation.variables ?? query}”` : active === "signals" ? "Matches from your active monitors." : "Signals you chose to keep."}</p>
+          </div>
+          <div className="pika-tab-switch">
+            <button className={active === "search" ? "is-active" : ""} onClick={() => setActive("search")}>Search</button>
+            <button className={active === "signals" ? "is-active" : ""} onClick={() => setActive("signals")}>Signals<i>{newSignals.length}</i></button>
+            <button className={active === "saved" ? "is-active" : ""} onClick={() => setActive("saved")}>Saved<i>{savedItems.length}</i></button>
+          </div>
+          {active === "search" && searchMutation.data && (
+            <button className="pika-save-search" onClick={() => saveSearchMutation.mutate(searchMutation.data.id)} disabled={saveSearchMutation.isPending || saveSearchMutation.isSuccess}>
+              <Plus size={15} />{saveSearchMutation.isSuccess ? "Search saved" : "Save this search"}
+            </button>
+          )}
+        </div>
+
+        {active === "search" && (
+          <SearchResultsTable results={searchResults} pending={searchMutation.isPending} hasSearched={Boolean(searchMutation.data)} />
+        )}
+        {active === "signals" && (
+          <SignalsTable signals={newSignals} title={signalTitle} excerpt={signalExcerpt} onSave={(id) => saveSignalMutation.mutate(id)} />
+        )}
+        {active === "saved" && (
+          <SavedTable items={savedItems} signalsById={new Map((signalsQuery.data ?? []).map((s) => [s.id, s]))} title={signalTitle} />
+        )}
+      </section>
+    </AppShell>
+  );
+}
+
+function SearchResultsTable({ results, pending, hasSearched }: { results: SearchResultItem[]; pending: boolean; hasSearched: boolean }) {
+  if (pending) return <div className="pika-table-empty"><Search size={20} /><b>Searching…</b></div>;
+  if (!hasSearched) return <div className="pika-table-empty"><Search size={20} /><b>Run a search to see results.</b><span>Full-text search over your authorized, monitored channels.</span></div>;
+  if (!results.length) return <div className="pika-table-empty"><Search size={20} /><b>No matches yet.</b><span>Try a broader search or connect more channels.</span></div>;
+  return (
+    <div className="pika-table-rows">
+      {results.map((item) => (
+        <article key={item.event_id}>
+          <div className="table-conversation"><span className="pika-result-mark coral">#</span><span><b>{item.snippet}</b><small>{item.event_type} · {new Date(item.occurred_at).toLocaleString()}</small></span></div>
+          <span className="table-source">Event</span>
+          <span className="table-topic">match</span>
+          <span className={`table-relevance relevance-${relevanceFromRank(item.rank).toLowerCase().replaceAll(" ", "-")}`}>{relevanceFromRank(item.rank)}</span>
+          <span />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function SignalsTable({ signals, title, excerpt, onSave }: { signals: Signal[]; title: (s: Signal) => string; excerpt: (s: Signal) => string; onSave: (id: string) => void }) {
+  if (!signals.length) return <div className="pika-table-empty"><Bell size={20} /><b>No new signals.</b><span>Create a monitor to start catching opportunities.</span></div>;
+  return (
+    <div className="pika-table-rows">
+      {signals.map((signal) => (
+        <article key={signal.id}>
+          <div className="table-conversation"><span className="pika-result-mark violet">{Math.round(signal.score)}</span><span><b>{title(signal)}</b><small>{excerpt(signal)}</small></span></div>
+          <span className="table-source">{signal.kind}</span>
+          <span className="table-topic">score {Math.round(signal.score)}</span>
+          <span className={`table-relevance relevance-${relevanceFromScore(signal.score).toLowerCase().replaceAll(" ", "-")}`}>{relevanceFromScore(signal.score)}</span>
+          <button onClick={() => onSave(signal.id)}><Bookmark size={15} /><span>Save</span></button>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function SavedTable({ items, signalsById, title }: { items: { id: string; signal_id: string; status: string; created_at: string }[]; signalsById: Map<string, Signal>; title: (s: Signal) => string }) {
+  if (!items.length) return <div className="pika-table-empty"><Bookmark size={20} /><b>No saved items yet.</b><span>Save a signal when you want to come back to it.</span></div>;
+  return (
+    <div className="pika-table-rows">
+      {items.map((item) => {
+        const signal = signalsById.get(item.signal_id);
+        return (
+          <article key={item.id}>
+            <div className="table-conversation"><span className="pika-result-mark orange">★</span><span><b>{signal ? title(signal) : "Saved signal"}</b><small>Saved {new Date(item.created_at).toLocaleDateString()}</small></span></div>
+            <span className="table-source">{signal?.kind ?? "—"}</span>
+            <span className="table-topic">{item.status}</span>
+            <span className="table-relevance relevance-useful">Saved</span>
+            <button className="is-saved"><Check size={15} /><span>Saved</span></button>
+          </article>
+        );
+      })}
+    </div>
+  );
 }
