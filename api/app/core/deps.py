@@ -30,6 +30,22 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
 
 NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found.")
 
+# Role-based access control: "owner" outranks "member". A workspace's creator is always
+# granted "owner" (see auth.signup and workspaces.create_workspace); today that means
+# every workspace has exactly one member, but the rank check is what makes future
+# multi-member workspaces safe to add without an authorization rewrite.
+ROLE_RANK = {"member": 0, "owner": 1}
+
+
+async def _get_membership(db: AsyncSession, user_id: UUID, workspace_id: UUID) -> WorkspaceMembership | None:
+    result = await db.execute(
+        select(WorkspaceMembership).where(
+            WorkspaceMembership.workspace_id == workspace_id,
+            WorkspaceMembership.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
 
 async def ensure_workspace_membership(db: AsyncSession, user_id: UUID, workspace_id: UUID) -> None:
     """The tenant-isolation boundary used by every workspace-scoped route and job.
@@ -40,14 +56,26 @@ async def ensure_workspace_membership(db: AsyncSession, user_id: UUID, workspace
     Raises 404, not 403, so a non-member cannot infer whether the workspace exists.
     """
 
-    result = await db.execute(
-        select(WorkspaceMembership).where(
-            WorkspaceMembership.workspace_id == workspace_id,
-            WorkspaceMembership.user_id == user_id,
-        )
-    )
-    if result.scalar_one_or_none() is None:
+    if await _get_membership(db, user_id, workspace_id) is None:
         raise NOT_FOUND
+
+
+async def ensure_workspace_role(db: AsyncSession, user_id: UUID, workspace_id: UUID, min_role: str) -> WorkspaceMembership:
+    """Membership plus a role check, for actions that are sensitive but not
+    tenant-isolation boundaries — e.g. only an owner may revoke a Discord connection or
+    change the billing plan. A non-member still gets 404 (see ensure_workspace_membership);
+    a member whose role is too low gets 403, since they already know the resource exists.
+    """
+
+    membership = await _get_membership(db, user_id, workspace_id)
+    if membership is None:
+        raise NOT_FOUND
+    if ROLE_RANK.get(membership.role, 0) < ROLE_RANK[min_role]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"This action requires the '{min_role}' role in this workspace.",
+        )
+    return membership
 
 
 async def require_admin(current_user: User = Depends(get_current_user)) -> User:

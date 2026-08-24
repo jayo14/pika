@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.billing_plans import get_plan_limits, within_limit
 from app.core.config import Settings, get_settings
-from app.core.deps import NOT_FOUND, ensure_workspace_membership, get_current_user
+from app.core.deps import NOT_FOUND, ensure_workspace_membership, ensure_workspace_role, get_current_user
 from app.core.oauth_state import consume_state, create_state
 from app.core.security import encrypt_secret
 from app.db.models import ConnectionChannel, ConnectionStatus, DiscordConnection, User
@@ -37,7 +37,9 @@ async def start_oauth(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> OAuthStartResponse:
-    await ensure_workspace_membership(db, current_user.id, payload.workspace_id)
+    # Connecting a Discord server changes what data flows into the whole workspace —
+    # restricted to owners, same as revoking a connection or changing the channel scope.
+    await ensure_workspace_role(db, current_user.id, payload.workspace_id, min_role="owner")
 
     if not settings.discord_integration_ready:
         raise HTTPException(
@@ -135,13 +137,21 @@ async def _load_owned_connection(db: AsyncSession, current_user: User, connectio
     return connection
 
 
+async def _load_owned_connection_for_owner(db: AsyncSession, current_user: User, connection_id: UUID) -> DiscordConnection:
+    connection = await db.get(DiscordConnection, connection_id)
+    if connection is None:
+        raise NOT_FOUND
+    await ensure_workspace_role(db, current_user.id, connection.workspace_id, min_role="owner")
+    return connection
+
+
 @router.post("/connections/{connection_id}/revoke", response_model=DiscordConnectionOut)
 async def revoke_connection(
     connection_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DiscordConnectionOut:
-    connection = await _load_owned_connection(db, current_user, connection_id)
+    connection = await _load_owned_connection_for_owner(db, current_user, connection_id)
     connection.status = ConnectionStatus.REVOKED.value
     connection.revoked_at = datetime.now(UTC)
     # Data minimization: a revoked connection retains no usable secret material.
@@ -172,7 +182,7 @@ async def replace_connection_channels(
     """Replaces the explicit channel allowlist. Pika only ever processes events from
     channels an administrator has explicitly listed here — nothing is inferred."""
 
-    await _load_owned_connection(db, current_user, connection_id)
+    await _load_owned_connection_for_owner(db, current_user, connection_id)
     existing = await db.execute(select(ConnectionChannel).where(ConnectionChannel.connection_id == connection_id))
     for row in existing.scalars().all():
         await db.delete(row)

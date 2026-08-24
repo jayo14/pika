@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.billing_plans import get_plan_limits
 from app.core.config import Settings, get_settings
-from app.core.deps import ensure_workspace_membership, get_current_user
+from app.core.deps import ensure_workspace_membership, ensure_workspace_role, get_current_user
 from app.db.models import Subscription, User
 from app.db.session import get_db
 from app.schemas import PlanChangeRequest, SubscriptionOut, UsageOut
@@ -63,7 +63,8 @@ async def change_plan(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> SubscriptionOut:
-    await ensure_workspace_membership(db, current_user.id, workspace_id)
+    # Billing affects the whole workspace's spend — only an owner can change plan.
+    await ensure_workspace_role(db, current_user.id, workspace_id, min_role="owner")
 
     if payload.plan != "free" and not settings.billing_provider_ready:
         raise HTTPException(

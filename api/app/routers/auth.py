@@ -16,19 +16,24 @@ from app.core.sessions import (
 )
 from app.db.models import User, Workspace, WorkspaceMembership
 from app.db.session import get_db
-from app.schemas import SessionResponse, SigninRequest, SignupRequest, UserOut, WorkspaceOut
+from app.schemas import SessionResponse, SigninRequest, SignupRequest, UserOut, WorkspaceMembershipOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-async def _load_workspaces(db: AsyncSession, user: User) -> list[Workspace]:
+async def _load_workspaces(db: AsyncSession, user: User) -> list[WorkspaceMembershipOut]:
     result = await db.execute(
-        select(Workspace)
+        select(Workspace, WorkspaceMembership.role)
         .join(WorkspaceMembership, WorkspaceMembership.workspace_id == Workspace.id)
         .where(WorkspaceMembership.user_id == user.id)
         .order_by(Workspace.created_at)
     )
-    return list(result.scalars().all())
+    return [
+        WorkspaceMembershipOut(
+            id=w.id, name=w.name, owner_user_id=w.owner_user_id, retention_days=w.retention_days, created_at=w.created_at, role=role
+        )
+        for w, role in result.all()
+    ]
 
 
 @router.post("/signup", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
@@ -55,7 +60,15 @@ async def signup(
 
     session_id = await create_session(user.id)
     set_session_cookie(response, session_id, settings)
-    return SessionResponse(user=UserOut.model_validate(user), workspaces=[WorkspaceOut.model_validate(workspace)])
+    membership = WorkspaceMembershipOut(
+        id=workspace.id,
+        name=workspace.name,
+        owner_user_id=workspace.owner_user_id,
+        retention_days=workspace.retention_days,
+        created_at=workspace.created_at,
+        role="owner",
+    )
+    return SessionResponse(user=UserOut.model_validate(user), workspaces=[membership])
 
 
 @router.post("/signin", response_model=SessionResponse)
@@ -77,7 +90,7 @@ async def signin(
     session_id = await create_session(user.id)
     set_session_cookie(response, session_id, settings)
     workspaces = await _load_workspaces(db, user)
-    return SessionResponse(user=UserOut.model_validate(user), workspaces=[WorkspaceOut.model_validate(w) for w in workspaces])
+    return SessionResponse(user=UserOut.model_validate(user), workspaces=workspaces)
 
 
 @router.post("/signout", status_code=status.HTTP_204_NO_CONTENT)
@@ -91,7 +104,4 @@ async def signout(request: Request, response: Response) -> None:
 @router.get("/me", response_model=SessionResponse)
 async def me(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> SessionResponse:
     workspaces = await _load_workspaces(db, current_user)
-    return SessionResponse(
-        user=UserOut.model_validate(current_user),
-        workspaces=[WorkspaceOut.model_validate(w) for w in workspaces],
-    )
+    return SessionResponse(user=UserOut.model_validate(current_user), workspaces=workspaces)

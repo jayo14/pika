@@ -64,9 +64,13 @@ class WorkspaceCreate(BaseModel):
     retention_days: int = Field(default=30, ge=1, le=365)
 
 
+class WorkspaceMembershipOut(WorkspaceOut):
+    role: Literal["owner", "member"]
+
+
 class SessionResponse(BaseModel):
     user: UserOut
-    workspaces: list[WorkspaceOut]
+    workspaces: list[WorkspaceMembershipOut]
 
 
 class OAuthStartRequest(BaseModel):
