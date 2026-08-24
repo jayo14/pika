@@ -8,10 +8,12 @@ from uuid import UUID
 
 from sqlalchemy import delete, select
 
+from app.core.config import get_settings
 from app.core.redis import get_redis
 from app.core.security import decrypt_secret
 from app.db.models import DiscordConnection, Event, Monitor, MonitorRule, Notification, Signal
 from app.db.session import get_sessionmaker
+from app.services.email_service import send_email
 from app.services.signal_engine import evaluate_event
 from app.workers.celery_app import celery_app
 
@@ -126,3 +128,33 @@ def purge_expired_events() -> int:
     if deleted_count:
         logger.info("purge_expired_events: deleted %s expired event(s)", deleted_count)
     return deleted_count
+
+
+@celery_app.task(
+    name="app.workers.tasks.send_password_reset_email",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=3,
+)
+def send_password_reset_email(to_email: str, reset_url: str) -> None:
+    """Sends the reset link, or — with no SMTP configured — logs it at INFO so a
+    developer can complete the flow locally. Same dry-run posture as the Discord Gateway
+    connector with no bot token: the request that triggered this never fails either way
+    (see POST /auth/password-reset/request), only the delivery channel differs."""
+
+    settings = get_settings()
+    if not settings.email_ready:
+        logger.info("SMTP not configured — password reset link for %s: %s", to_email, reset_url)
+        return
+
+    send_email(
+        settings,
+        to=to_email,
+        subject="Reset your Pika password",
+        body=(
+            "A password reset was requested for your Pika account.\n\n"
+            f"Reset it here (expires in 30 minutes): {reset_url}\n\n"
+            "If you didn't request this, you can safely ignore this email."
+        ),
+    )

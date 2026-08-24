@@ -24,6 +24,7 @@ class CapabilityResponse(BaseModel):
     api: HealthResponse
     discord: IntegrationCapability
     workspace: IntegrationCapability
+    email: IntegrationCapability
 
 
 class SignupRequest(BaseModel):
@@ -36,6 +37,28 @@ class SignupRequest(BaseModel):
 class SigninRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=10, max_length=128)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=10, max_length=128)
+
+
+class ProfileUpdateRequest(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
+
+
+class MessageResponse(BaseModel):
+    message: str
 
 
 class UserOut(BaseModel):

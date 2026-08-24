@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request
 
 from app.core.config import Settings
 from app.schemas import CapabilityResponse, HealthResponse
-from app.services.discord_capabilities import discord_capability, workspace_capability
+from app.services.discord_capabilities import discord_capability, email_capability, workspace_capability
 
 router = APIRouter(tags=["system"])
 
@@ -24,4 +24,5 @@ async def capabilities(request: Request) -> CapabilityResponse:
         api=HealthResponse(service=settings.product_name, version=settings.version),
         discord=discord_capability(settings),
         workspace=workspace_capability(settings),
+        email=email_capability(settings),
     )
