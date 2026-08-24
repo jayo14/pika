@@ -68,6 +68,41 @@ class SessionResponse(BaseModel):
     workspaces: list[WorkspaceOut]
 
 
+class OAuthStartRequest(BaseModel):
+    workspace_id: UUID
+
+
+class OAuthStartResponse(BaseModel):
+    authorize_url: str
+
+
+class DiscordConnectionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    workspace_id: UUID
+    discord_guild_id: str
+    discord_guild_name: str | None
+    status: str
+    granted_at: datetime | None
+    revoked_at: datetime | None
+    created_at: datetime
+
+
+class ConnectionChannelIn(BaseModel):
+    discord_channel_id: str = Field(min_length=1, max_length=32)
+    mode: Literal["allow", "deny"] = "allow"
+
+
+class ConnectionChannelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    connection_id: UUID
+    discord_channel_id: str
+    mode: str
+
+
 class MonitorCreate(BaseModel):
     connection_id: UUID
     name: str = Field(min_length=1, max_length=160)

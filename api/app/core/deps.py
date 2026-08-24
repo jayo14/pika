@@ -28,28 +28,35 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     return user
 
 
-async def require_workspace_member(
-    workspace_id: UUID,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> Workspace:
-    """Every workspace-scoped route depends on this: it is the tenant-isolation boundary.
+NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found.")
 
-    A workspace ID in the path is never sufficient authorization on its own — membership
-    must be proven for the authenticated user before the resource lookup proceeds.
+
+async def ensure_workspace_membership(db: AsyncSession, user_id: UUID, workspace_id: UUID) -> None:
+    """The tenant-isolation boundary used by every workspace-scoped route and job.
+
+    A workspace ID — whether from a path, a query parameter, or a loaded resource's
+    foreign key — is never sufficient authorization on its own. Membership must be
+    proven for the authenticated user before the resource lookup or mutation proceeds.
+    Raises 404, not 403, so a non-member cannot infer whether the workspace exists.
     """
 
     result = await db.execute(
         select(WorkspaceMembership).where(
             WorkspaceMembership.workspace_id == workspace_id,
-            WorkspaceMembership.user_id == current_user.id,
+            WorkspaceMembership.user_id == user_id,
         )
     )
     if result.scalar_one_or_none() is None:
-        # 404, not 403: do not reveal whether a workspace exists to a non-member.
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
+        raise NOT_FOUND
 
+
+async def require_workspace_member(
+    workspace_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Workspace:
+    await ensure_workspace_membership(db, current_user.id, workspace_id)
     workspace = await db.get(Workspace, workspace_id)
     if workspace is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
+        raise NOT_FOUND
     return workspace
