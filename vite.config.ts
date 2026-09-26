@@ -203,7 +203,42 @@ function vitePluginStorageProxy(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), vitePluginStorageProxy()];
+function vitePluginAnalytics(): Plugin {
+  return {
+    name: "vite-plugin-analytics",
+    transformIndexHtml(html) {
+      const endpoint = process.env.VITE_ANALYTICS_ENDPOINT;
+      const websiteId = process.env.VITE_ANALYTICS_WEBSITE_ID;
+      if (endpoint && websiteId) {
+        return {
+          html,
+          tags: [
+            {
+              tag: "script",
+              attrs: {
+                defer: true,
+                src: `${endpoint.replace(/\/+$/, "")}/umami`,
+                "data-website-id": websiteId,
+              },
+              injectTo: "body",
+            },
+          ],
+        };
+      }
+      return html;
+    },
+  };
+}
+
+const plugins = [
+  react(),
+  tailwindcss(),
+  jsxLocPlugin(),
+  vitePluginManusRuntime(),
+  vitePluginManusDebugCollector(),
+  vitePluginStorageProxy(),
+  vitePluginAnalytics(),
+];
 
 export default defineConfig({
   plugins,

@@ -60,6 +60,16 @@ Redis-compatible key-value service, and the client as a Render static site.
    compatible offering). Blueprint schemas change — if that block fails to provision,
    delete it and point `REDIS_URL` at an external Redis (e.g. Upstash) instead.
 
+## Option C: Vercel (Client static hosting)
+
+When deploying the frontend to Vercel:
+1. Vercel builds the client using Vite (`pnpm run build`).
+2. The output directory is configured as `dist/public` in `vercel.json` (matching Vite's `build.outDir`).
+3. Single Page Application (SPA) routing rewrites `/(.*)` to `/index.html` via `vercel.json`.
+4. The Python backend in `api/` is excluded via `.vercelignore` so Vercel does not attempt to compile it as serverless functions.
+5. Set `VITE_API_BASE_URL` in the Vercel project environment variables to your deployed backend URL (e.g. `https://pika-api.onrender.com`).
+6. In your backend configuration, include your Vercel deployment URL (e.g. `https://pika-kappa.vercel.app`) in `PIKA_CORS_ORIGINS`.
+
 ## Configuration reference
 
 See `api/.env.example` for the full variable list. `DATABASE_URL` and `REDIS_URL` are
